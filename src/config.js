@@ -15,13 +15,27 @@ if (fs.existsSync(envFile)) {
 }
 
 const env = process.env;
+
+// Banco: DATABASE_URL, ou POSTGRES_URL (criada pela integração Supabase ↔ Vercel). Os parâmetros sslmode/supa da URL
+// são retirados: o SSL é configurado por DB_SSL (o certificado do Supabase não está na lista padrão do Node).
+function urlDoBanco() {
+  const bruta = env.DATABASE_URL || env.POSTGRES_URL || '';
+  if (!bruta) return '';
+  try {
+    const u = new URL(bruta);
+    if (u.searchParams.has('sslmode') && env.DB_SSL === undefined) env.DB_SSL = 'true';
+    for (const k of ['sslmode', 'supa', 'pgbouncer', 'sslrootcert']) u.searchParams.delete(k);
+    return u.toString();
+  } catch (_) { return bruta; }
+}
+const DB_URL = urlDoBanco();
 const isProd = env.NODE_ENV === 'production';
 
 const config = {
   isProd,
   port: parseInt(env.PORT || '8080', 10),
   appUrl: (env.APP_URL || `http://localhost:${env.PORT || 8080}`).replace(/\/$/, ''),
-  databaseUrl: env.DATABASE_URL || 'postgres://routproject:routproject@localhost:5432/routproject',
+  databaseUrl: DB_URL || 'postgres://routproject:routproject@localhost:5432/routproject',
   dbSsl: env.DB_SSL === 'true',
   dbSslCa: env.DB_SSL_CA || '',
   sessionSecret: env.SESSION_SECRET || '',
@@ -44,8 +58,8 @@ const config = {
 };
 
 // Sem SESSION_SECRET (ex.: Vercel), deriva um segredo da string do banco, que já é secreta no servidor
-if ((!config.sessionSecret || config.sessionSecret.length < 24) && isProd && env.DATABASE_URL) {
-  config.sessionSecret = require('crypto').createHash('sha256').update('routproject-session:' + env.DATABASE_URL).digest('hex');
+if ((!config.sessionSecret || config.sessionSecret.length < 24) && isProd && DB_URL) {
+  config.sessionSecret = require('crypto').createHash('sha256').update('routproject-session:' + DB_URL).digest('hex');
 }
 
 if (!config.sessionSecret || config.sessionSecret.length < 24) {
