@@ -3,6 +3,9 @@
   "framework": null,
   "buildCommand": "",
   "outputDirectory": "vercel-static",
+  "regions": [
+    "gru1"
+  ],
   "functions": {
     "api/index.js": {
       "includeFiles": "{public,src,db}/**",
@@ -10,9 +13,15 @@
     }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
   ],
   "crons": [
-    { "path": "/api/cron/geocodificar", "schedule": "0 9 * * *" }
+    {
+      "path": "/api/cron/geocodificar",
+      "schedule": "0 9 * * *"
+    }
   ]
 }
