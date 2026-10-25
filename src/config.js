@@ -43,6 +43,11 @@ const config = {
   },
 };
 
+// Sem SESSION_SECRET (ex.: Vercel), deriva um segredo da string do banco, que já é secreta no servidor
+if ((!config.sessionSecret || config.sessionSecret.length < 24) && isProd && env.DATABASE_URL) {
+  config.sessionSecret = require('crypto').createHash('sha256').update('routproject-session:' + env.DATABASE_URL).digest('hex');
+}
+
 if (!config.sessionSecret || config.sessionSecret.length < 24) {
   if (isProd) {
     console.error('[config] SESSION_SECRET ausente ou curto (mínimo 24 caracteres). Defina antes de subir em produção.');

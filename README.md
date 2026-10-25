@@ -589,4 +589,4 @@ O mesmo código roda no Vercel como uma função só (`api/index.js`), com o ban
 - A localização automática de endereços roda pelo Vercel Cron (`/api/cron/geocodificar`, 1x por dia, protegido por `CRON_SECRET`); o botão de localizar no Painel de rotas continua funcionando a qualquer hora.
 - Limite do Vercel: cada requisição aceita até 4,5 MB (fotos e arquivos maiores precisam ser reduzidos antes do envio).
 
-Variáveis no projeto do Vercel: `DATABASE_URL` (string do pooler do Supabase, porta 6543), `DB_SSL=true`, `DB_POOL_MAX=3`, `SESSION_SECRET`, `APP_URL`, `NODE_ENV=production`, `NODEJS_HELPERS=0`, `CRON_SECRET`.
+Variáveis no projeto do Vercel: `DATABASE_URL` (string do pooler do Supabase, porta 6543), `DB_SSL=true`, `DB_POOL_MAX=3`, `APP_URL`, `NODE_ENV=production`, `NODEJS_HELPERS=0`, `ADMIN_EMAIL` e `ADMIN_PASSWORD` (primeiro acesso). Opcionais: `SESSION_SECRET` (sem ele, o segredo é derivado da `DATABASE_URL`) e `CRON_SECRET` (liga a localização diária).
