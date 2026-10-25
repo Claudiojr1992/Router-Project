@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Criar cadastro · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="auth">
+  <aside class="auth-brand" id="brand"></aside>
+  <main class="auth-main">
+    <form class="auth-card" id="f" novalidate>
+      <span class="mobile-logo"></span>
+      <h1>Criar cadastro</h1>
+      <p class="lead">Depois de confirmar o e-mail, o administrador libera o seu acesso.</p>
+      <div class="alert" id="msg" hidden></div>
+      <div class="field"><label for="nome">Nome completo</label><input class="input" id="nome" autocomplete="name" required></div>
+      <div class="field"><label for="email">E-mail</label><input class="input" id="email" type="email" autocomplete="email" required></div>
+      <div class="field"><label for="empresa">Empresa <span class="muted">(opcional)</span></label><input class="input" id="empresa" autocomplete="organization"></div>
+      <div class="field" style="margin-bottom:6px"><label>Qual é a sua função?</label></div>
+      <div class="seg" role="radiogroup" aria-label="Função">
+        <label><input type="radio" name="perfil" value="tecnico" checked><span>Técnico</span></label>
+        <label><input type="radio" name="perfil" value="coordenador"><span>Coordenação</span></label>
+        <label><input type="radio" name="perfil" value="supervisor"><span>Supervisão</span></label>
+        <label><input type="radio" name="perfil" value="administrativo"><span>Administrativo</span></label>
+        <label><input type="radio" name="perfil" value="cliente"><span>Cliente</span></label>
+      </div>
+      <div class="field"><label for="senha">Senha</label><div class="pw"><input class="input" id="senha" type="password" autocomplete="new-password" data-strength="st" required></div>
+        <div class="strength"><i id="st"></i></div><small id="st-t">Use 8+ caracteres com letras e números</small></div>
+      <div class="field"><label for="senha2">Confirme a senha</label><div class="pw"><input class="input" id="senha2" type="password" autocomplete="new-password" required></div></div>
+      <label class="check"><input type="checkbox" id="aceite"> Li e aceito os termos de uso e a política de privacidade.</label>
+      <button class="btn primary block" id="go">Criar cadastro</button>
+      <p class="alt">Já tem acesso? <a href="/">Entrar</a></p>
+    </form>
+  </main>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+const msg = RP.$('#msg');
+RP.$('#f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (RP.$('#senha').value !== RP.$('#senha2').value) { RP.showAlert(msg, 'err', 'As senhas não conferem'); return; }
+  RP.busy(RP.$('#go'), async () => {
+    try {
+      const email = RP.$('#email').value.trim();
+      await RP.api('/auth/cadastro', { method: 'POST', body: {
+        nome: RP.$('#nome').value, email, empresa: RP.$('#empresa').value,
+        perfil_solicitado: RP.$('input[name=perfil]:checked').value, senha: RP.$('#senha').value, aceite: RP.$('#aceite').checked } });
+      location.href = '/confirmar.html?email=' + encodeURIComponent(email);
+    } catch (err) { RP.showAlert(msg, 'err', err.message); }
+  });
+});
+</script>
+</body>
+</html>

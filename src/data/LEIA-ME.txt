@@ -1,0 +1,3 @@
+Fontes dos dados:
+- municipios.json: coordenadas dos municípios brasileiros (IBGE), do repositório kelvins/municipios-brasileiros (licença MIT, © 2016 Kelvin S. do Prado). Formato: [nome, UF, latitude, longitude].
+- aeroportos.json: principais aeroportos comerciais, coordenadas aproximadas. Formato: [nome, latitude, longitude].

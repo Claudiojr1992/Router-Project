@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nova senha · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="auth">
+  <aside class="auth-brand" id="brand"></aside>
+  <main class="auth-main">
+    <form class="auth-card" id="f" novalidate>
+      <span class="mobile-logo"></span>
+      <div id="passo1">
+        <h1>Criar nova senha</h1>
+        <p class="lead">Se <b id="para"></b> estiver cadastrado, você recebeu um código válido por 15 minutos.</p>
+        <div class="alert" id="msg" hidden></div>
+        <div class="field" id="campoEmail" hidden><label for="email">E-mail</label><input class="input" id="email" type="email" autocomplete="email"></div>
+        <div class="field" style="margin-bottom:6px"><label>Código</label></div>
+        <div class="code-inputs" aria-label="Código de 6 dígitos">
+          <input inputmode="numeric" maxlength="1" aria-label="Dígito 1" autocomplete="one-time-code"><input inputmode="numeric" maxlength="1" aria-label="Dígito 2">
+          <input inputmode="numeric" maxlength="1" aria-label="Dígito 3"><input inputmode="numeric" maxlength="1" aria-label="Dígito 4">
+          <input inputmode="numeric" maxlength="1" aria-label="Dígito 5"><input inputmode="numeric" maxlength="1" aria-label="Dígito 6">
+        </div>
+        <div class="field"><label for="senha">Nova senha</label><div class="pw"><input class="input" id="senha" type="password" autocomplete="new-password" data-strength="st" required></div>
+          <div class="strength"><i id="st"></i></div><small id="st-t">Use 8+ caracteres com letras e números</small></div>
+        <div class="field"><label for="senha2">Confirme a nova senha</label><div class="pw"><input class="input" id="senha2" type="password" autocomplete="new-password" required></div></div>
+        <button class="btn primary block" id="go">Salvar nova senha</button>
+        <p class="alt"><a href="/recuperar.html">Pedir outro código</a></p>
+      </div>
+      <div id="passo2" hidden>
+        <h1>Senha alterada</h1>
+        <p class="lead">Pronto. Use a nova senha para entrar.</p>
+        <a class="btn primary block" href="/">Entrar</a>
+      </div>
+    </form>
+  </main>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+const msg = RP.$('#msg');
+const email = new URLSearchParams(location.search).get('email') || '';
+if (email) RP.$('#para').textContent = email; else { RP.$('#para').textContent = 'o seu e-mail'; RP.$('#campoEmail').hidden = false; }
+RP.$('#f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (RP.$('#senha').value !== RP.$('#senha2').value) { RP.showAlert(msg, 'err', 'As senhas não conferem'); return; }
+  RP.busy(RP.$('#go'), async () => {
+    try {
+      await RP.api('/auth/redefinir', { method: 'POST', body: { email: email || RP.$('#email').value.trim(), codigo: window.lerCodigo(), senha: RP.$('#senha').value } });
+      RP.$('#passo1').hidden = true; RP.$('#passo2').hidden = false;
+    } catch (err) { RP.showAlert(msg, 'err', err.message); }
+  });
+});
+</script>
+</body>
+</html>

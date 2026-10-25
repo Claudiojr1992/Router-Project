@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conexões · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+</head>
+<body>
+<script>
+// Conexões: NetBox (sites) e Zabbix (hosts e monitoramento)
+let S, cons = [], contratos = [], fonte = 'netbox', achados = [], ctSel = null;
+const NOME = { netbox: 'NetBox', zabbix: 'Zabbix' };
+const DESC = { netbox: 'Fonte dos sites (endereços) e destino dos sites novos', zabbix: 'Hosts existentes e destino do monitoramento depois da ativação' };
+const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
+const f = (id, label, val = '', extra = '', ajuda = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${RP.esc(val ?? '')}" ${extra}>${ajuda ? `<small>${ajuda}</small>` : ''}</div>`;
+let gestor = false;
+
+(async () => {
+  S = await Shell.init({ key: 'conexoes', title: 'Conexões', sub: 'NetBox e Zabbix: traga sites e hosts como endereços e suba os ativos para o monitoramento depois da ativação', perfis: Shell.ESC });
+  gestor = Shell.pode('conexoes', 'editar');
+  [cons, contratos] = await Promise.all([RP.api('/conexoes'), RP.api('/projetos')]);
+  ctSel = contratos[0]?.id || null;
+  render();
+})();
+
+function estado(c) {
+  if (!c.url || !c.tem_token) return ['Não configurado', 'var(--muted)'];
+  if (c.teste_ok === true) return ['Conectado', 'var(--ok)'];
+  if (c.teste_ok === false) return ['Erro na conexão', 'var(--err)'];
+  return ['Não testado', 'var(--warn)'];
+}
+
+function render() {
+  const optCt = contratos.map((c) => `<option value="${c.id}" ${c.id === ctSel ? 'selected' : ''}>${RP.esc(c.cliente)} · ${RP.esc(c.numero)} (${c.enderecos} end.)</option>`).join('');
+  S.content.innerHTML = `
+    <div class="cxgrid">${cons.map(cardCon).join('')}</div>
+    <div class="card">
+      <header><h2>Trazer sites como endereços</h2><span class="muted" style="font-size:.88rem">Ex.: um site do BNB para ativar já cadastrado no NetBox entra como endereço do contrato, com as atividades</span></header>
+      <div class="body" style="display:flex;flex-direction:column;gap:12px">
+        <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div class="vtabs" role="tablist" style="margin:0">${['netbox', 'zabbix'].map((t) => `<button type="button" role="tab" class="eqc" data-fonte="${t}" aria-pressed="${fonte === t}">${t === 'netbox' ? 'Sites do NetBox' : 'Hosts do Zabbix'}</button>`).join('')}</div>
+          <div class="field" style="margin:0;flex:1;min-width:240px"><label for="cx-ct">Contrato de destino</label><select class="input" id="cx-ct">${optCt}</select></div>
+          <div class="field" style="margin:0;flex:1;min-width:200px"><label for="cx-q">Buscar</label><input class="input" id="cx-q" type="search" placeholder="${fonte === 'netbox' ? 'Nome, slug ou código do site' : 'Nome do host'}"></div>
+          <button class="btn primary" id="cx-go">Buscar no ${NOME[fonte]}</button>
+        </div>
+        <div id="cx-res"><div class="empty">Busque para listar os ${fonte === 'netbox' ? 'sites' : 'hosts'}. Você revisa município e UF antes de importar.</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <header><h2>Enviar endereços ao NetBox</h2></header>
+      <div class="body row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <p class="muted" style="margin:0;flex:1;min-width:260px">Endereços cadastrados aqui (à mão ou por planilha) que ainda não existem no NetBox viram sites novos, com status <b>${RP.esc(cons.find((c) => c.tipo === 'netbox')?.opcoes?.status_novo || 'planned')}</b>, código, endereço e coordenadas. O vínculo fica gravado no endereço.</p>
+        <button class="btn" id="nb-env">Criar sites no NetBox para o contrato escolhido</button>
+      </div>
+    </div>`;
+  RP.$$('[data-salvar]').forEach((b) => (b.onclick = () => salvar(b.dataset.salvar)));
+  RP.$$('[data-testar]').forEach((b) => (b.onclick = () => testar(b.dataset.testar, b)));
+  RP.$$('[data-remover]').forEach((b) => (b.onclick = () => remover(b.dataset.remover)));
+  RP.$$('[data-fonte]').forEach((b) => (b.onclick = () => { fonte = b.dataset.fonte; achados = []; render(); }));
+  RP.$('#cx-ct').onchange = (e) => { ctSel = +e.target.value; if (achados.length) buscar(); };
+  RP.$('#cx-go').onclick = buscar;
+  RP.$('#cx-q').onkeydown = (e) => { if (e.key === 'Enter') buscar(); };
+  RP.$('#nb-env').onclick = enviarNetbox;
+}
+
+function cardCon(c) {
+  const [st, cor] = estado(c), o = c.opcoes || {}, t = c.tipo, dis = gestor ? '' : 'disabled';
+  return `<section class="card cxcard" aria-labelledby="h-${t}">
+    <header><div><h2 id="h-${t}">${NOME[t]}</h2><small class="muted">${DESC[t]}</small></div><span class="pjbadge" style="--c:${cor}"><i></i>${st}</span></header>
+    <div class="body">
+      ${c.teste_msg ? `<p class="cxmsg" style="color:${c.teste_ok ? 'var(--ok)' : 'var(--err)'}">${RP.esc(c.teste_msg)}${c.teste_em ? ` <span class="muted">· ${RP.fmtDataHora(c.teste_em)}</span>` : ''}</p>` : ''}
+      ${f(`${t}-url`, 'URL', c.url, `type="url" placeholder="https://${t}.suaempresa.com.br" ${dis}`, t === 'zabbix' ? 'Endereço do frontend; o sistema completa com /api_jsonrpc.php.' : 'Endereço do NetBox; o sistema usa /api/.')}
+      ${f(`${t}-tk`, 'Token de API', '', `type="password" autocomplete="off" placeholder="${c.tem_token ? '•••••••• salvo · deixe em branco para manter' : 'Cole o token'}" ${dis}`,
+        t === 'netbox' ? 'NetBox → seu usuário → API Tokens. Para criar sites, o token precisa permitir escrita.' : 'Zabbix → Usuários → API tokens. O usuário precisa poder criar hosts e grupos.')}
+      ${t === 'zabbix' ? `<div class="row" style="gap:10px">
+          <div style="flex:1">${f('zb-g', 'Grupo padrão dos hosts', o.grupo || '', `placeholder="RoutProject" ${dis}`)}</div>
+          <div style="flex:1">${f('zb-c', 'Comunidade SNMP padrão', o.comunidade || '', `placeholder="{$SNMP_COMMUNITY}" ${dis}`)}</div></div>
+        <div class="row" style="gap:10px">
+          <div style="flex:1">${f('zb-ts', 'Template SNMP', o.template_snmp || '', `placeholder="Ex.: Generic by SNMP" ${dis}`)}</div>
+          <div style="flex:1">${f('zb-ta', 'Template agente', o.template_agent || '', `placeholder="Ex.: Linux by Zabbix agent" ${dis}`)}</div>
+          <div style="flex:1">${f('zb-ti', 'Template ping', o.template_icmp || '', `placeholder="ICMP Ping" ${dis}`)}</div></div>
+        <label class="check"><input type="checkbox" id="zb-old" ${o.auth_corpo ? 'checked' : ''} ${dis}> Zabbix anterior à 6.4 (token no corpo da requisição)</label>`
+      : `<div class="field"><label for="nb-st">Status dos sites criados pelo sistema</label><select class="input" id="nb-st" ${dis}>${[['planned', 'Planejado'], ['staging', 'Em preparação'], ['active', 'Ativo']].map(([k, l]) => `<option value="${k}" ${(o.status_novo || 'planned') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`}
+      <label class="check"><input type="checkbox" id="${t}-ins" ${o.inseguro ? 'checked' : ''} ${dis}> Aceitar certificado próprio (HTTPS interno sem certificado público)</label>
+      ${gestor ? `<div class="row" style="gap:8px;margin-top:12px"><button class="btn primary" data-salvar="${t}">Salvar</button><button class="btn" data-testar="${t}" ${c.tem_token ? '' : 'disabled'}>Testar conexão</button>${c.tem_token ? `<span class="spacer"></span><button class="btn danger sm" data-remover="${t}">Remover</button>` : ''}</div>`
+        : '<p class="muted" style="font-size:.85rem">Só administrador e coordenação alteram as conexões.</p>'}
+    </div></section>`;
+}
+
+async function salvar(t) {
+  const v = (id) => RP.$('#' + id)?.value.trim();
+  const body = { url: v(`${t}-url`), token: v(`${t}-tk`) || undefined, opcoes: { inseguro: RP.$(`#${t}-ins`).checked } };
+  if (t === 'zabbix') Object.assign(body.opcoes, { grupo: v('zb-g'), comunidade: v('zb-c'), template_snmp: v('zb-ts'), template_agent: v('zb-ta'), template_icmp: v('zb-ti'), auth_corpo: RP.$('#zb-old').checked });
+  else body.opcoes.status_novo = v('nb-st');
+  try {
+    await RP.api('/conexoes/' + t, { method: 'PUT', body });
+    RP.toast(`${NOME[t]} salvo. Testando…`);
+    const r = await RP.api(`/conexoes/${t}/testar`, { method: 'POST' });
+    RP.toast(r.msg);
+  } catch (e) { RP.toast(e.message); }
+  cons = await RP.api('/conexoes'); render();
+}
+async function testar(t, b) {
+  await RP.busy(b, async () => { try { const r = await RP.api(`/conexoes/${t}/testar`, { method: 'POST' }); RP.toast(r.msg); } catch (e) { RP.toast(e.message); } });
+  cons = await RP.api('/conexoes'); render();
+}
+async function remover(t) {
+  if (!confirm(`Remover a conexão com o ${NOME[t]}? Os endereços já importados continuam.`)) return;
+  await RP.api('/conexoes/' + t, { method: 'DELETE' }); cons = await RP.api('/conexoes'); render();
+}
+
+async function buscar() {
+  const el = RP.$('#cx-res');
+  el.innerHTML = `<div class="empty">Buscando no ${NOME[fonte]}…</div>`;
+  try {
+    achados = await RP.api(`/conexoes/${fonte}/sites?q=${encodeURIComponent(RP.$('#cx-q').value.trim())}&contrato=${ctSel}`);
+    achados.forEach((a) => { a.sel = !a.existente; });
+    tabela();
+  } catch (e) { el.innerHTML = `<div class="empty" style="color:var(--err)">${RP.esc(e.message)}</div>`; }
+}
+
+function tabela() {
+  const el = RP.$('#cx-res');
+  if (!achados.length) { el.innerHTML = '<div class="empty">Nada encontrado com essa busca.</div>'; return; }
+  const n = achados.filter((a) => a.sel).length;
+  el.innerHTML = `
+    <div class="row" style="justify-content:space-between;margin-bottom:8px;gap:10px;flex-wrap:wrap">
+      <label class="check" style="margin:0"><input type="checkbox" id="cx-all" ${n === achados.length ? 'checked' : ''}> ${achados.length} ${fonte === 'netbox' ? 'site(s)' : 'host(s)'} · <b id="cx-n">${n}</b> selecionado(s)</label>
+      <div class="row" style="gap:10px"><label class="check" style="margin:0"><input type="checkbox" id="cx-up" checked> Atualizar os que já existem no contrato</label><button class="btn primary" id="cx-imp">Importar selecionados</button></div>
+    </div>
+    <div class="scroll" style="max-height:56vh;border:1px solid var(--line);border-radius:10px"><table class="tbl"><thead><tr><th></th><th>Nome</th><th>Código</th><th>Endereço</th><th>Município</th><th>UF</th><th>Situação</th></tr></thead><tbody>
+    ${achados.map((a, i) => `<tr><td><input type="checkbox" data-i="${i}" ${a.sel ? 'checked' : ''} aria-label="Selecionar ${RP.esc(a.nome)}"></td>
+      <td><b>${RP.esc(a.nome)}</b><div class="muted" style="font-size:.78rem">${[a.status, a.regiao, a.tenant, a.grupo, a.ip].filter(Boolean).map(RP.esc).join(' · ')}</div></td>
+      <td>${RP.esc(a.codigo || '—')}</td><td style="max-width:260px;font-size:.85rem">${RP.esc(a.logradouro || '—')}${a.lat != null ? '<div class="muted" style="font-size:.75rem">com coordenadas</div>' : ''}</td>
+      <td><input class="input cxin${a.municipio ? '' : ' falta'}" data-mun="${i}" value="${RP.esc(a.municipio || '')}" placeholder="Informe" aria-label="Município de ${RP.esc(a.nome)}"></td>
+      <td><select class="input cxin${a.uf ? '' : ' falta'}" data-uf="${i}" aria-label="UF de ${RP.esc(a.nome)}"><option value="">—</option>${UFS.map((u) => `<option ${u === a.uf ? 'selected' : ''}>${u}</option>`).join('')}</select></td>
+      <td style="font-size:.82rem">${a.existente ? `<span class="${a.existente.mesmo ? 'tag-fora' : 'tag-late'}">${a.existente.mesmo ? 'já no contrato' : 'em ' + RP.esc(a.existente.cliente + ' · ' + a.existente.contrato)}</span>` : '<span style="color:var(--ok);font-weight:600">novo</span>'}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  const conta = () => { RP.$('#cx-n').textContent = achados.filter((a) => a.sel).length; };
+  RP.$$('[data-i]', el).forEach((c) => (c.onchange = () => { achados[+c.dataset.i].sel = c.checked; conta(); }));
+  RP.$$('[data-mun]', el).forEach((c) => (c.oninput = () => { achados[+c.dataset.mun].municipio = c.value.trim(); c.classList.toggle('falta', !c.value.trim()); }));
+  RP.$$('[data-uf]', el).forEach((c) => (c.onchange = () => { achados[+c.dataset.uf].uf = c.value; c.classList.toggle('falta', !c.value); }));
+  RP.$('#cx-all').onchange = (e) => { achados.forEach((a) => (a.sel = e.target.checked)); tabela(); };
+  RP.$('#cx-imp').onclick = (ev) => importar(ev.currentTarget);
+}
+
+async function importar(b) {
+  const sel = achados.filter((a) => a.sel);
+  if (!sel.length) return RP.toast('Selecione pelo menos um item');
+  const falta = sel.filter((a) => !a.municipio || !a.uf);
+  if (falta.length) return RP.toast(`Informe município e UF de: ${falta.slice(0, 3).map((a) => a.nome).join(', ')}${falta.length > 3 ? '…' : ''}`);
+  await RP.busy(b, async () => {
+    try {
+      const r = await RP.api(`/conexoes/${fonte}/importar`, { method: 'POST', body: { contrato_id: ctSel, atualizar: RP.$('#cx-up').checked, itens: sel } });
+      RP.toast(`${r.criados} endereço(s) criados, ${r.atualizados} atualizados${r.ignorados ? `, ${r.ignorados} ignorados` : ''}`);
+      contratos = await RP.api('/projetos'); await buscar();
+    } catch (e) { RP.toast(e.message); }
+  });
+}
+
+async function enviarNetbox(ev) {
+  const b = ev.currentTarget;
+  const lista = await RP.api(`/contratos/${ctSel}/monitoramento`);
+  const ids = lista.filter((e) => !e.netbox_site_id).map((e) => e.endereco_id);
+  if (!ids.length) return RP.toast('Todos os endereços deste contrato já estão no NetBox');
+  if (!confirm(`Criar ${ids.length} site(s) no NetBox para os endereços deste contrato que ainda não têm vínculo?`)) return;
+  await RP.busy(b, async () => {
+    try {
+      let criados = 0; const erros = [];
+      for (let i = 0; i < ids.length; i += 500) { const r = await RP.api('/conexoes/netbox/enviar', { method: 'POST', body: { endereco_ids: ids.slice(i, i + 500) } }); criados += r.criados; erros.push(...r.erros); }
+      RP.toast(`${criados} site(s) criados no NetBox${erros.length ? ` · ${erros.length} com erro: ${erros[0]}` : ''}`);
+    } catch (e) { RP.toast(e.message); }
+  });
+}
+</script>
+</body>
+</html>

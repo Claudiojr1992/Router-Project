@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checklists · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+</head>
+<body>
+<script>
+const TIPOS = { check: 'Marcar feito', foto: 'Foto', texto: 'Texto', numero: 'Número' };
+let S, lista = [];
+
+(async () => {
+  S = await Shell.init({ key: 'checklists', title: 'Checklists', sub: 'Passos que o técnico confirma ao executar uma atividade', perfis: Shell.ESC });
+  if (Shell.pode('checklists', 'editar')) { S.actions.innerHTML = '<button class="btn sm primary" id="novo">+ Novo checklist</button>'; RP.$('#novo').onclick = () => editar(null); }
+  carregar();
+})();
+
+async function carregar() {
+  lista = await RP.api('/checklists');
+  const gestor = Shell.pode('checklists', 'editar');
+  S.content.innerHTML = lista.length ? `<div class="grid2">${lista.map((c) => `<div class="card ccard" ${gestor ? `data-id="${c.id}" role="button" tabindex="0"` : ''}>
+    <h3>${RP.esc(c.nome)}</h3><div class="muted" style="font-size:.9rem">${c.itens.length} itens · relatório ${c.relatorio ? '<b style="color:var(--accent)">com modelo próprio</b>' : 'no modelo padrão'}</div>
+    ${gestor ? `<div class="row" style="gap:6px"><button class="btn sm" type="button" data-mod="${c.id}">Modelo do relatório</button></div>` : ''}
+    <ol style="margin:0;padding-left:20px;display:grid;gap:4px">${c.itens.map((i) => `<li>${RP.esc(i.texto)}${i.obrigatorio ? '<span class="req" title="Obrigatório">*</span>' : ''} <span class="muted" style="font-size:.8rem">· ${TIPOS[i.tipo_resposta]}${i.obrigatorio ? '' : ' · opcional'}</span></li>`).join('')}</ol></div>`).join('')}</div>`
+    : '<div class="card empty">Nenhum checklist ainda.</div>';
+  RP.$$('[data-id]', S.content).forEach((b) => { b.onclick = (e) => { if (e.target.closest('[data-mod]')) return; editar(lista.find((c) => c.id === +b.dataset.id)); }; b.onkeydown = (e) => { if (e.key === 'Enter' && e.target === b) b.onclick(e); }; });
+  RP.$$('[data-mod]', S.content).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); modeloRelatorio(lista.find((c) => c.id === +b.dataset.mod)); }));
+}
+
+function linha(it = { texto: '', tipo_resposta: 'check', obrigatorio: true }) {
+  return `<div class="row item" style="margin-bottom:8px;flex-wrap:nowrap"><input class="input it-t" placeholder="Descreva o passo" value="${RP.esc(it.texto)}" aria-label="Item">
+    <select class="input it-s" style="max-width:130px" aria-label="Tipo de resposta">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${k === it.tipo_resposta ? 'selected' : ''}>${v}</option>`).join('')}</select>
+    <label class="check" style="margin:0;white-space:nowrap;font-size:.85rem" title="O técnico só conclui a atividade com este item preenchido"><input type="checkbox" class="it-o" ${it.obrigatorio !== false ? 'checked' : ''}> Obrigatório</label>
+    <button class="x" type="button" aria-label="Remover item">×</button></div>`;
+}
+
+function editar(c) {
+  const d = RP.drawer(c ? 'Editar checklist' : 'Novo checklist', `
+    <div class="field"><label for="k-nome">Nome</label><input class="input" id="k-nome" required value="${RP.esc(c?.nome || '')}" placeholder="Ex.: Instalação de câmeras"></div>
+    <div class="field"><label>Itens</label><div id="itens">${(c?.itens.length ? c.itens : [undefined, undefined]).map(linha).join('')}</div>
+    <button class="btn sm" type="button" id="add">+ Item</button></div>
+    <p class="muted" style="font-size:.88rem">Itens marcados como <b>Obrigatório</b> aparecem com <span class="req">*</span> no app, e a atividade só pode ser concluída com eles preenchidos. Para usar, vincule o checklist a uma atividade na tela Atividades.</p>`, {
+    onSave: async (el) => {
+      const itens = RP.$$('.item', el).map((r) => ({ texto: r.querySelector('.it-t').value.trim(), tipo_resposta: r.querySelector('.it-s').value, obrigatorio: r.querySelector('.it-o').checked })).filter((i) => i.texto);
+      if (!itens.length) throw new Error('Inclua pelo menos um item');
+      const body = { nome: RP.$('#k-nome', el).value, itens };
+      if (c) await RP.api('/checklists/' + c.id, { method: 'PUT', body }); else await RP.api('/checklists', { method: 'POST', body });
+      RP.toast('Checklist salvo'); carregar();
+    },
+  });
+  const box = RP.$('#itens', d.el);
+  const bind = () => RP.$$('.item .x', box).forEach((b) => (b.onclick = () => b.closest('.item').remove()));
+  RP.$('#add', d.el).onclick = () => { box.insertAdjacentHTML('beforeend', linha()); bind(); box.lastElementChild.querySelector('.it-t').focus(); };
+  bind();
+}
+
+// ---------- Modelo do relatório (cabeçalho, campos, termo e assinaturas) ----------
+const SECOES = { equipamentos: 'Equipamentos do endereço', checklist: 'Checklist', historico: 'Histórico e comentários', fotos: 'Fotos' };
+const linhaCampo = (c = {}) => `<div class="row mcampo" style="margin-bottom:6px;flex-wrap:nowrap"><input class="input mc-r" style="max-width:200px" placeholder="Rótulo" value="${RP.esc(c.rotulo || '')}" aria-label="Rótulo">
+  <input class="input mc-v" placeholder="Valor, ex.: {cliente}" value="${RP.esc(c.valor || '')}" aria-label="Valor"><button class="x" type="button" aria-label="Remover campo">×</button></div>`;
+const linhaAss = (a = '') => `<div class="row mass" style="margin-bottom:6px;flex-wrap:nowrap"><input class="input ma" placeholder="Ex.: Cliente" value="${RP.esc(a)}" aria-label="Assinatura"><button class="x" type="button" aria-label="Remover assinatura">×</button></div>`;
+
+async function modeloRelatorio(c) {
+  const info = await RP.api(`/checklists/${c.id}/relatorio`);
+  let m = info.modelo || JSON.parse(JSON.stringify(info.padrao));
+  const d = RP.drawer(`Modelo do relatório · ${c.nome}`, `<div id="mr"></div>`, {
+    saveLabel: 'Salvar modelo',
+    onSave: async () => {
+      const r = await RP.api(`/checklists/${c.id}/relatorio`, { method: 'PUT', body: { modelo: ler() } });
+      RP.toast('Modelo salvo: os próximos relatórios já saem assim'); carregar();
+    },
+  });
+  d.el.classList.add('wide');
+  const box = RP.$('#mr', d.el);
+  const vars = info.variaveis.map((v) => `<code>{${v}}</code>`).join(' ');
+  function desenhar() {
+    box.innerHTML = `
+      <p class="muted" style="margin-top:0">Vale para todo relatório das atividades que usam este checklist, inclusive o enviado para o cliente assinar. Use as variáveis nos textos e campos: ${vars}</p>
+      <div class="row" style="gap:8px;margin-bottom:14px">
+        <label class="btn sm">Importar JSON<input type="file" accept=".json,application/json" hidden id="mr-imp"></label>
+        <button class="btn sm" type="button" id="mr-exp">Exportar JSON</button>
+        <button class="btn sm" type="button" id="mr-prev">Ver prévia (PDF)</button>
+        <button class="btn sm danger" type="button" id="mr-pad">Voltar ao padrão</button></div>
+      <div class="row" style="align-items:flex-start;gap:16px">
+        <div style="flex:1;min-width:260px">
+          <div class="field"><label for="mr-t">Título</label><input class="input" id="mr-t" value="${RP.esc(m.titulo)}" placeholder="Ex.: Relatório de entrega · {atividade}"></div>
+          <div class="field"><label for="mr-s">Subtítulo</label><input class="input" id="mr-s" value="${RP.esc(m.subtitulo)}" placeholder="Ex.: Contrato {contrato} · {cliente}"></div>
+          <div class="field"><label for="mr-e">Empresa no cabeçalho</label><input class="input" id="mr-e" value="${RP.esc(m.empresa)}" placeholder="Vazio = empresa do contrato"></div>
+          <div class="row"><div class="field" style="flex:1"><label for="mr-c">Cor do cabeçalho</label><input class="input" type="color" id="mr-c" value="${m.cor}" style="padding:4px;min-height:44px"></div>
+            <div class="field" style="flex:2"><label for="mr-l">Logo (PNG ou JPG, até 300 KB)</label><input class="input" type="file" id="mr-l" accept="image/png,image/jpeg">
+              ${m.logo ? `<div class="row" style="gap:8px;margin-top:6px"><img src="${m.logo}" alt="Logo" style="max-height:34px;max-width:140px;background:${m.cor};padding:4px;border-radius:6px"><button class="btn sm" type="button" id="mr-lx">Remover logo</button></div>` : ''}</div></div>
+          <div class="field"><label for="mr-i">Texto de abertura</label><textarea class="input" id="mr-i" placeholder="Opcional. Ex.: Relatório dos serviços executados em {endereco} ({municipio}/{uf}).">${RP.esc(m.introducao)}</textarea></div>
+          <div class="field"><label>Seções</label>${Object.entries(SECOES).map(([k, t]) => `<label class="check" style="margin:0 0 6px"><input type="checkbox" class="mr-sec" value="${k}" ${m.secoes[k] ? 'checked' : ''}> ${t}</label>`).join('')}</div>
+        </div>
+        <div style="flex:1;min-width:260px">
+          <div class="field"><label>Quadro de informações do cabeçalho</label><div id="mr-campos">${m.campos.map(linhaCampo).join('')}</div><button class="btn sm" type="button" style="align-self:flex-start" id="mr-cadd">+ Campo</button></div>
+          <div class="field"><label for="mr-tr">Termo de aceite</label><textarea class="input" id="mr-tr" placeholder="Texto acima das assinaturas">${RP.esc(m.termo)}</textarea></div>
+          <div class="field"><label>Assinaturas (até 4)</label><div id="mr-ass">${m.assinaturas.map(linhaAss).join('')}</div><button class="btn sm" type="button" style="align-self:flex-start" id="mr-aadd">+ Assinatura</button>
+            <small>A assinatura digital feita pelo cliente no link entra no campo que tiver “Cliente” no nome (ou no último).</small></div>
+        </div></div>`;
+    const bindX = () => RP.$$('.x', box).forEach((b) => (b.onclick = () => b.parentElement.remove()));
+    bindX();
+    RP.$('#mr-cadd', box).onclick = () => { RP.$('#mr-campos', box).insertAdjacentHTML('beforeend', linhaCampo()); bindX(); };
+    RP.$('#mr-aadd', box).onclick = () => { if (RP.$$('.mass', box).length >= 4) return RP.toast('Até 4 assinaturas'); RP.$('#mr-ass', box).insertAdjacentHTML('beforeend', linhaAss()); bindX(); };
+    RP.$('#mr-lx', box)?.addEventListener('click', () => { m = ler(); m.logo = null; desenhar(); });
+    RP.$('#mr-l', box).onchange = (e) => { const f = e.target.files[0]; if (!f) return; if (f.size > 300 * 1024) { RP.toast('Logo muito grande: use até 300 KB'); return; }
+      const r = new FileReader(); r.onload = () => { m = ler(); m.logo = r.result; desenhar(); }; r.readAsDataURL(f); };
+    RP.$('#mr-imp', box).onchange = (e) => { const f = e.target.files[0]; if (!f) return; const r = new FileReader();
+      r.onload = () => { try { const j = JSON.parse(r.result); m = Object.assign(JSON.parse(JSON.stringify(info.padrao)), j, { secoes: Object.assign({}, info.padrao.secoes, j.secoes || {}) }); desenhar(); RP.toast('Modelo importado: confira e salve'); } catch (_) { RP.toast('Arquivo JSON inválido'); } };
+      r.readAsText(f); };
+    RP.$('#mr-exp', box).onclick = () => { const blob = new Blob([JSON.stringify(ler(), null, 2)], { type: 'application/json' }); const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = `modelo-relatorio-${c.nome.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); };
+    RP.$('#mr-pad', box).onclick = () => { if (!confirm('Voltar este checklist para o modelo padrão do relatório?')) return; m = JSON.parse(JSON.stringify(info.padrao)); desenhar(); };
+    RP.$('#mr-prev', box).onclick = (ev) => RP.busy(ev.currentTarget, async () => {
+      const w = window.open('', '_blank');
+      try {
+        const r = await fetch(`/api/checklists/${c.id}/relatorio/previa`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modelo: ler() }) });
+        if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.erro || 'Não foi possível gerar a prévia'); }
+        const url = URL.createObjectURL(await r.blob());
+        if (w) w.location.href = url; else location.href = url;
+      } catch (e) { if (w) w.close(); RP.toast(e.message); }
+    });
+  }
+  function ler() {
+    return {
+      titulo: RP.$('#mr-t', box).value.trim(), subtitulo: RP.$('#mr-s', box).value.trim(), empresa: RP.$('#mr-e', box).value.trim(), cor: RP.$('#mr-c', box).value, logo: m.logo || null,
+      campos: RP.$$('.mcampo', box).map((r) => ({ rotulo: r.querySelector('.mc-r').value.trim(), valor: r.querySelector('.mc-v').value.trim() })).filter((x) => x.rotulo),
+      introducao: RP.$('#mr-i', box).value.trim(), termo: RP.$('#mr-tr', box).value.trim(),
+      secoes: Object.fromEntries(RP.$$('.mr-sec', box).map((x) => [x.value, x.checked])),
+      assinaturas: RP.$$('.ma', box).map((x) => x.value.trim()).filter(Boolean),
+    };
+  }
+  desenhar();
+}
+</script>
+</body>
+</html>

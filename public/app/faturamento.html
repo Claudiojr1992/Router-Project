@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Faturamento · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+<script src="/js/planilha.js"></script>
+</head>
+<body>
+<script>
+// Faturamento: medição mensal por contrato. Endereço apto = passou da etapa exigida pela regra de cobrança e ainda não foi medido.
+let S, contratos = [], atual = null;
+const R$ = (n) => (+n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const ST = { aberta: ['Aberta', 'var(--muted)'], enviada: ['Enviada ao cliente', 'var(--info)'], aprovada: ['Aprovada', 'var(--accent)'], nf_emitida: ['NF emitida', 'var(--warn)'], recebida: ['Recebida', 'var(--ok)'] };
+const PASSOS = ['aberta', 'enviada', 'aprovada', 'nf_emitida', 'recebida'];
+const REGRA = { apos_validacao: 'após a validação das imagens', apos_handover: 'após o handover' };
+const MES = (d) => { const [y, m] = String(d).slice(0, 7).split('-'); return ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][+m - 1] + '/' + y; };
+const pill = (s) => `<span class="pill" style="color:${ST[s][1]}"><i></i>${ST[s][0]}</span>`;
+
+(async () => {
+  S = await Shell.init({ key: 'faturamento', title: 'Faturamento', sub: 'Medição mensal por contrato: endereços aptos, envio, aprovação, nota fiscal e recebimento', perfis: Shell.ESC });
+  const id = +new URLSearchParams(location.search).get('c');
+  await lista();
+  if (id && contratos.some((c) => c.id === id)) abrirContrato(id);
+})();
+
+let fFiltro = 'todos', fBusca = '';
+// Situação do contrato no faturamento
+const fsit = (c) => (c.aptos ? 'pronto' : c.em_andamento ? 'medicao' : c.valor_total && c.recebido >= c.valor_total ? 'recebido' : 'aguarda');
+const FS = { pronto: ['Pronto para medir', 'var(--warn)'], medicao: ['Em medição', 'var(--info)'], recebido: ['Recebido', 'var(--ok)'], aguarda: ['Aguardando execução', 'var(--muted)'] };
+const fpct = (c) => (c.valor_total ? Math.min(100, Math.round((c.faturado / c.valor_total) * 100)) : 0);
+const FICO = {
+  un: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/></svg>',
+  ap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>',
+  rc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+  ed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
+};
+const RC = (n) => (Math.abs(n) >= 1e6 ? 'R$ ' + (n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mi' : Math.abs(n) >= 1e4 ? 'R$ ' + Math.round(n / 1e3).toLocaleString('pt-BR') + ' mil' : R$(n));
+
+async function lista() {
+  history.replaceState(null, '', '/app/faturamento.html');
+  atual = null; S.actions.innerHTML = '';
+  contratos = await RP.api('/faturamento/contratos');
+  if (!contratos.length) { S.content.innerHTML = '<div class="card empty">Nenhum contrato ativo.</div>'; return; }
+  const T = contratos.reduce((a, c) => ({ apto: a.apto + c.valor_apto, and: a.and + c.em_andamento, fat: a.fat + c.faturado, rec: a.rec + c.recebido, tot: a.tot + c.valor_total, n: a.n + c.aptos }), { apto: 0, and: 0, fat: 0, rec: 0, tot: 0, n: 0 });
+  const g = T.tot ? Math.min(100, Math.round((T.fat / T.tot) * 100)) : 0;
+  const n = { todos: contratos.length, pronto: 0, medicao: 0, recebido: 0, aguarda: 0 };
+  contratos.forEach((c) => n[fsit(c)]++);
+  S.content.innerHTML = `
+    <section class="pjhero card">
+      <div class="pjring"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="50"/><circle cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="${g} 100"/></svg><div><b>${g}%</b><span>faturado</span></div></div>
+      <div class="pjhero-t"><h2>Avanço do faturamento</h2><p class="muted">${R$(T.fat)} faturados de ${R$(T.tot)} previstos em ${contratos.length} contrato(s)${T.tot ? '' : ' · defina os valores nos contratos'}</p>
+        <div class="pjbar lg"><i style="width:${g}%"></i></div></div>
+      <div class="pjhero-k">
+        <div><span>Pronto para medir</span><b style="color:${T.apto ? 'var(--warn)' : 'inherit'}">${RC(T.apto)}</b></div>
+        <div><span>Em medição</span><b style="color:var(--info)">${RC(T.and)}</b></div>
+        <div><span>Faturado (NF)</span><b>${RC(T.fat)}</b></div>
+        <div><span>Recebido</span><b style="color:var(--ok)">${RC(T.rec)}</b></div>
+      </div>
+    </section>
+    <div class="pjtools">
+      <input class="input" id="fc-q" type="search" placeholder="Buscar cliente ou contrato" value="${RP.esc(fBusca)}" aria-label="Buscar contrato">
+      <div class="vtabs" role="tablist" aria-label="Filtrar contratos" style="margin:0">${[['todos', 'Todos'], ['pronto', 'Prontos para medir'], ['medicao', 'Em medição'], ['recebido', 'Recebidos'], ['aguarda', 'Aguardando']]
+        .map(([k, t]) => `<button type="button" role="tab" class="eqc" data-ff="${k}" aria-pressed="${fFiltro === k}">${t} <small>${n[k]}</small></button>`).join('')}</div>
+    </div>
+    <div class="pjgrid" id="fc-grid"></div>`;
+  const q$ = RP.$('#fc-q'); q$.oninput = () => { fBusca = q$.value; fcards(); };
+  RP.$$('[data-ff]').forEach((b) => (b.onclick = () => { fFiltro = b.dataset.ff; RP.$$('[data-ff]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); fcards(); }));
+  fcards();
+}
+
+function fcards() {
+  const lq = fBusca.trim().toLowerCase();
+  const l = contratos.filter((c) => (fFiltro === 'todos' || fsit(c) === fFiltro) && (!lq || (c.cliente + ' ' + c.numero + ' ' + (c.empresa || '')).toLowerCase().includes(lq)));
+  const el = RP.$('#fc-grid');
+  if (!l.length) { el.innerHTML = '<div class="card empty" style="grid-column:1/-1">Nenhum contrato neste filtro.</div>'; return; }
+  el.innerHTML = l.map((c) => {
+    const st = fsit(c), pc = fpct(c), falta = Math.max(0, c.valor_total - c.faturado), sv = !c.valor_camera && !c.valor_endereco;
+    return `<article class="pjcard" data-id="${c.id}" tabindex="0" role="button" aria-label="Abrir faturamento de ${RP.esc(c.cliente)} ${RP.esc(c.numero)}">
+      <div class="pjtop"><span class="pjbadge" style="--c:${FS[st][1]}"><i></i>${FS[st][0]}</span>${c.empresa ? `<span class="pjfora">${RP.esc(c.empresa)}</span>` : ''}</div>
+      <h3>${RP.esc(c.cliente)} · ${RP.esc(c.numero)}</h3>
+      <p class="pjdate">Faturar ${REGRA[c.regra_cobranca]} · ${c.valor_camera ? R$(c.valor_camera) + '/câmera' : ''}${c.valor_camera && c.valor_endereco ? ' + ' : ''}${c.valor_endereco ? R$(c.valor_endereco) + '/endereço' : ''}${sv ? '<span class="tag-late">sem valores no contrato</span>' : ''}</p>
+      <div class="pjmeta">
+        <div><span>Faturado do contrato</span><b>${RC(c.faturado)} <small>/ ${RC(c.valor_total)}</small></b><small class="${sv || falta ? '' : 'ok'}">${sv ? 'Defina os valores para calcular' : falta ? `${R$(falta)} a faturar` : 'Contrato todo faturado'}</small></div>
+        <a class="pjedit" href="/app/clientes.html?id=${c.cliente_id}&aba=contratos" title="Editar valores e regra do contrato" aria-label="Editar contrato">${FICO.ed}</a>
+      </div>
+      <div class="pjprog"><div class="pjprog-h"><span>Avanço do faturamento</span><b>${pc}%</b></div><div class="pjbar" style="--c:${FS[st][1] === 'var(--muted)' ? 'var(--accent)' : FS[st][1]}"><i style="width:${pc}%"></i></div></div>
+      <div class="pjtiles">
+        <div><span class="ic">${FICO.un}</span><b>${RP.fmtN(c.medidos)}<small style="font-size:.85rem"> /${RP.fmtN(c.enderecos)}</small></b><small>Medidos</small></div>
+        <div class="${c.aptos ? 'warm' : ''}"><span class="ic at">${FICO.ap}</span><b>${RP.fmtN(c.aptos)}</b><small>Prontos · ${RC(c.valor_apto)}</small></div>
+        <div><span class="ic ok">${FICO.rc}</span><b style="font-size:1.1rem">${RC(c.recebido)}</b><small>Recebido</small></div>
+      </div>
+      <p class="pjopen">Clique para abrir as medições →</p>
+    </article>`;
+  }).join('');
+  RP.$$('.pjcard', el).forEach((card) => {
+    card.onclick = (e) => { if (e.target.closest('a')) return; abrirContrato(+card.dataset.id); };
+    card.onkeydown = (e) => { if (e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); abrirContrato(+card.dataset.id); } };
+  });
+}
+
+async function abrirContrato(id) {
+  history.replaceState(null, '', '/app/faturamento.html?c=' + id);
+  const d = await RP.api('/faturamento/contratos/' + id);
+  atual = d; const ct = d.contrato;
+  S.actions.innerHTML = `<button class="btn sm" id="voltar">← Todos os contratos</button>${d.aptos.length ? '<button class="btn sm primary" id="nova">+ Nova medição</button>' : ''}`;
+  RP.$('#voltar').onclick = lista;
+  RP.$('#nova')?.addEventListener('click', novaMedicao);
+  const totApto = d.aptos.reduce((a, e) => a + e.valor, 0);
+  S.content.innerHTML = `
+    <div class="card"><div class="body row" style="gap:16px;align-items:flex-start">
+      <div style="flex:1;min-width:240px"><h2 style="font-size:1.6rem">${RP.esc(ct.cliente)} · ${RP.esc(ct.numero)}</h2>
+        <div class="muted">${ct.empresa ? 'Executora: ' + RP.esc(ct.empresa) + ' · ' : ''}faturar ${REGRA[ct.regra_cobranca]} · ${ct.valor_camera ? R$(ct.valor_camera) + ' por câmera' : ''}${ct.valor_camera && ct.valor_endereco ? ' + ' : ''}${ct.valor_endereco ? R$(ct.valor_endereco) + ' por endereço' : ''}${!ct.valor_camera && !ct.valor_endereco ? '<span class="tag-late">defina os valores no contrato (Clientes → Contratos)</span>' : ''}</div></div>
+      <div class="kpi" style="min-width:180px"><span>Pronto para medir</span><b>${R$(totApto)}</b><small class="muted">${d.aptos.length} endereço(s)</small></div></div></div>
+    <div class="card"><header><h2>Medições</h2></header>
+      ${d.medicoes.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Competência</th><th>Situação</th><th style="text-align:right">Endereços</th><th style="text-align:right">Câmeras</th><th style="text-align:right">Valor</th><th>Nota fiscal</th><th>Andamento</th></tr></thead><tbody>
+        ${d.medicoes.map((m) => `<tr class="click" data-m="${m.id}" tabindex="0"><td><b>${MES(m.competencia)}</b></td><td>${pill(m.status)}</td><td style="text-align:right">${m.enderecos}</td><td style="text-align:right">${m.cameras}</td>
+          <td style="text-align:right"><b>${R$(m.valor_total)}</b></td><td>${m.numero_nf ? RP.esc(m.numero_nf) + ' · ' + RP.fmtData(m.emitida_em) : '—'}</td>
+          <td><div class="fstep">${PASSOS.map((p, i) => `<i class="${PASSOS.indexOf(m.status) >= i ? 'on' : ''}" title="${ST[p][0]}"></i>`).join('')}</div></td></tr>`).join('')}</tbody></table></div>`
+        : '<div class="empty">Nenhuma medição ainda. Use “+ Nova medição” para medir os endereços aptos.</div>'}</div>
+    <div class="card"><header><h2>Aptos a medir</h2><span class="pill">${d.aptos.length}</span></header>
+      ${d.aptos.length ? `<div class="scroll" style="max-height:420px"><table class="tbl"><thead><tr><th>Código</th><th>Endereço</th><th>Município</th><th>Status</th><th style="text-align:right">Câmeras</th><th style="text-align:right">Valor</th></tr></thead><tbody>
+        ${d.aptos.map((e) => `<tr><td>${RP.esc(e.codigo || '—')}</td><td><b>${RP.esc(e.nome)}</b></td><td>${RP.esc(e.municipio)}/${e.uf}</td><td>${RP.esc(e.status)}</td><td style="text-align:right">${e.cameras}</td><td style="text-align:right">${R$(e.valor)}</td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty">Nenhum endereço apto agora. Eles aparecem aqui quando chegam ${ct.regra_cobranca === 'apos_handover' ? 'ao Handover' : 'à Validação'} (ou são concluídos).</div>`}</div>`;
+  RP.$$('[data-m]', S.content).forEach((r) => { r.onclick = () => medicao(+r.dataset.m); r.onkeydown = (e) => { if (e.key === 'Enter') r.onclick(); }; });
+}
+
+function novaMedicao() {
+  const d = atual, hoje = new Date(), comp = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+  const dr = RP.drawer('Nova medição', `
+    <div class="row"><div class="field" style="flex:1"><label for="nm-c">Competência (mês)</label><input class="input" type="month" id="nm-c" value="${comp}" required></div>
+      <div class="field" style="flex:2"><label for="nm-o">Observação</label><input class="input" id="nm-o" placeholder="Opcional"></div></div>
+    <div class="row" style="justify-content:space-between;margin-bottom:6px"><label class="check" style="margin:0"><input type="checkbox" id="nm-all" checked> Todos os ${d.aptos.length} aptos</label><b id="nm-tot"></b></div>
+    <div class="scroll" style="max-height:52vh;border:1px solid var(--line);border-radius:10px"><table class="tbl"><tbody>
+      ${d.aptos.map((e) => `<tr><td style="width:30px"><input type="checkbox" class="nm-e" value="${e.id}" data-v="${e.valor}" checked aria-label="Incluir ${RP.esc(e.nome)}"></td><td><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.municipio)}/${e.uf} · ${RP.esc(e.status)}</div></td><td style="text-align:right">${e.cameras} câm.</td><td style="text-align:right">${R$(e.valor)}</td></tr>`).join('')}</tbody></table></div>`, {
+    saveLabel: 'Criar medição',
+    onSave: async (el) => {
+      const ids = RP.$$('.nm-e', el).filter((x) => x.checked).map((x) => +x.value);
+      if (!ids.length) throw new Error('Selecione pelo menos um endereço');
+      const m = await RP.api(`/faturamento/contratos/${d.contrato.id}/medicoes`, { method: 'POST', body: { competencia: RP.$('#nm-c', el).value, endereco_ids: ids, observacao: RP.$('#nm-o', el).value } });
+      RP.toast('Medição criada'); await abrirContrato(d.contrato.id); medicao(m.id);
+    },
+  });
+  dr.el.classList.add('wide');
+  const tot = () => { const s = RP.$$('.nm-e', dr.el).filter((x) => x.checked); RP.$('#nm-tot', dr.el).textContent = `${s.length} endereço(s) · ${R$(s.reduce((a, x) => a + +x.dataset.v, 0))}`; };
+  RP.$('#nm-all', dr.el).onchange = (e) => { RP.$$('.nm-e', dr.el).forEach((x) => (x.checked = e.target.checked)); tot(); };
+  RP.$$('.nm-e', dr.el).forEach((x) => (x.onchange = tot)); tot();
+}
+
+async function medicao(id) {
+  const m = await RP.api('/medicoes/' + id);
+  const prox = { aberta: ['enviar', 'Marcar como enviada ao cliente'], enviada: ['aprovar', 'Cliente aprovou'], aprovada: ['nf', 'Registrar nota fiscal'], nf_emitida: ['receber', 'Marcar como recebida'] }[m.status];
+  const dr = RP.drawer(`Medição ${MES(m.competencia)} · ${m.contrato}`, `
+    <div class="fsteps">${PASSOS.map((p, i) => { const on = PASSOS.indexOf(m.status) >= i; const dt = { enviada: m.enviada_em, aprovada: m.aprovada_em, nf_emitida: m.emitida_em, recebida: m.recebida_em }[p];
+      return `<div class="${on ? 'on' : ''}"><i>${i + 1}</i><b>${ST[p][0]}</b><small>${dt ? RP.fmtData(dt) : p === 'aberta' ? RP.fmtData(m.criado_em) : ''}</small></div>`; }).join('')}</div>
+    <div class="row" style="gap:16px;margin:12px 0"><div class="kpi" style="flex:1"><span>Valor</span><b>${R$(m.valor_total)}</b></div><div class="kpi" style="flex:1"><span>Endereços</span><b>${m.itens.length}</b></div>
+      <div class="kpi" style="flex:1"><span>Câmeras</span><b>${m.itens.reduce((a, x) => a + x.cameras, 0)}</b></div></div>
+    ${m.numero_nf ? `<p style="margin:0 0 10px">Nota fiscal <b>${RP.esc(m.numero_nf)}</b> emitida em ${RP.fmtData(m.emitida_em)}.</p>` : ''}
+    ${prox ? `<div class="card" style="padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px"><b>Próximo passo</b>
+      <div class="row" style="gap:8px;align-items:flex-end">${prox[0] === 'nf' ? '<div class="field" style="margin:0;flex:1"><label for="md-nf">Número da NF</label><input class="input" id="md-nf"></div>' : ''}
+        <div class="field" style="margin:0"><label for="md-dt">Data</label><input class="input" type="date" id="md-dt" value="${new Date().toLocaleDateString('sv')}"></div>
+        <button class="btn primary" type="button" id="md-go">${prox[1]}</button></div>
+      ${prox[0] === 'nf' ? '<small class="muted">Os endereços desta medição que estão “Em validação” passam para “Faturado”.</small>' : ''}</div>` : '<p class="ok" style="color:var(--ok);font-weight:700">Medição recebida. Ciclo concluído.</p>'}
+    <div class="row" style="gap:8px;margin-bottom:10px"><button class="btn sm" type="button" id="md-x">Baixar planilha (.xlsx)</button>
+      ${['enviada', 'aprovada'].includes(m.status) ? '<button class="btn sm" type="button" id="md-re">Reabrir</button>' : ''}
+      ${m.status === 'aberta' ? '<button class="btn sm danger" type="button" id="md-del">Excluir medição</button>' : ''}</div>
+    <div class="field"><label for="md-o">Observação</label><textarea class="input" id="md-o">${RP.esc(m.observacao || '')}</textarea></div>
+    <div class="scroll" style="border:1px solid var(--line);border-radius:10px;max-height:40vh"><table class="tbl"><thead><tr><th>Endereço</th><th>Status</th><th style="text-align:right">Câm.</th><th style="text-align:right">Valor</th>${m.status === 'aberta' ? '<th></th>' : ''}</tr></thead><tbody>
+      ${m.itens.map((e) => `<tr><td><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.codigo || '')} ${RP.esc(e.municipio)}/${e.uf}</div></td><td>${RP.esc(e.status)}</td><td style="text-align:right">${e.cameras}</td><td style="text-align:right">${R$(e.valor)}</td>
+        ${m.status === 'aberta' ? `<td><button class="btn sm danger" type="button" data-tira="${e.endereco_id}" title="Tirar desta medição">×</button></td>` : ''}</tr>`).join('')}</tbody></table></div>`, {
+    saveLabel: 'Salvar observação',
+    onSave: async (el) => { await RP.api('/medicoes/' + id, { method: 'PATCH', body: { acao: 'observacao', observacao: RP.$('#md-o', el).value } }); RP.toast('Observação salva'); },
+  });
+  dr.el.classList.add('wide');
+  const el = dr.el, depois = async (msg) => { RP.toast(msg); dr.close(); await abrirContrato(atual.contrato.id); medicao(id); };
+  RP.$('#md-go', el)?.addEventListener('click', (ev) => RP.busy(ev.currentTarget, async () => {
+    try { await RP.api('/medicoes/' + id, { method: 'PATCH', body: { acao: prox[0], data: RP.$('#md-dt', el).value, numero_nf: RP.$('#md-nf', el)?.value } }); await depois('Medição atualizada'); } catch (e) { RP.toast(e.message); }
+  }));
+  RP.$('#md-re', el)?.addEventListener('click', async () => { try { await RP.api('/medicoes/' + id, { method: 'PATCH', body: { acao: 'reabrir' } }); await depois('Medição reaberta'); } catch (e) { RP.toast(e.message); } });
+  RP.$('#md-del', el)?.addEventListener('click', async () => { if (!confirm('Excluir esta medição? Os endereços voltam a ficar aptos.')) return; try { await RP.api('/medicoes/' + id, { method: 'DELETE' }); RP.toast('Medição excluída'); dr.close(); abrirContrato(atual.contrato.id); } catch (e) { RP.toast(e.message); } });
+  RP.$$('[data-tira]', el).forEach((b) => (b.onclick = async () => { try { await RP.api(`/medicoes/${id}/enderecos/${b.dataset.tira}`, { method: 'DELETE' }); await depois('Endereço retirado da medição'); } catch (e) { RP.toast(e.message); } }));
+  RP.$('#md-x', el).onclick = () => {
+    const linhas = [['Código', 'Endereço', 'Município', 'UF', 'Status', 'Câmeras', 'Valor (R$)'], ...m.itens.map((e) => [e.codigo || '', e.nome, e.municipio, e.uf, e.status, e.cameras, e.valor]),
+      ['', 'Total', '', '', '', m.itens.reduce((a, x) => a + x.cameras, 0), m.valor_total]];
+    Planilha.baixar(Planilha.xlsx([{ nome: 'Medição', linhas, larguras: [10, 34, 22, 6, 16, 10, 14] }]), `Medicao_${String(m.competencia).slice(0, 7)}_${m.contrato}.xlsx`.replace(/[^A-Za-z0-9._-]+/g, '_'));
+  };
+}
+</script>
+</body>
+</html>

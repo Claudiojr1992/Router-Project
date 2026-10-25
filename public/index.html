@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="auth">
+  <aside class="auth-brand" id="brand"></aside>
+  <main class="auth-main">
+    <form class="auth-card" id="f" novalidate>
+      <span class="mobile-logo"></span>
+      <h1>Entrar</h1>
+      <p class="lead">Acesse com o e-mail e a senha cadastrados.</p>
+      <div class="alert" id="msg" hidden></div>
+      <div class="field"><label for="email">E-mail</label><input class="input" id="email" type="email" autocomplete="email" required></div>
+      <div class="field"><label for="senha">Senha</label><div class="pw"><input class="input" id="senha" type="password" autocomplete="current-password" required></div></div>
+      <div class="row" style="margin-bottom:16px">
+        <label class="check" style="margin:0"><input type="checkbox" id="lembrar" checked> Manter conectado</label>
+        <span class="spacer"></span><a href="/recuperar.html">Esqueci minha senha</a>
+      </div>
+      <button class="btn primary block" id="go">Entrar</button>
+      <p class="alt">Ainda não tem acesso? <a href="/cadastro.html">Criar cadastro</a></p>
+    </form>
+  </main>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+const msg = RP.$('#msg');
+const volta = new URLSearchParams(location.search).get('volta');
+const destino = (u) => (volta && volta.startsWith('/app/')) ? volta : (u.perfil === 'tecnico' ? '/m/' : u.perfil === 'admin' || (u.permissoes && u.permissoes.rota && u.permissoes.rota !== 'nenhum') ? '/app/rota.html' : '/app/minhas.html');
+RP.api('/auth/me').then((r) => { location.replace(destino(r.usuario)); }).catch(() => {});
+RP.$('#f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  RP.busy(RP.$('#go'), async () => {
+    RP.showAlert(msg, '', '');
+    const email = RP.$('#email').value.trim();
+    try {
+      const r = await RP.api('/auth/login', { method: 'POST', body: { email, senha: RP.$('#senha').value, lembrar: RP.$('#lembrar').checked } });
+      location.href = destino(r.usuario);
+    } catch (err) {
+      if (err.data && err.data.status === 'pendente_email') {
+        msg.className = 'alert info'; msg.hidden = false;
+        msg.innerHTML = `${RP.esc(err.message)}. <a href="/confirmar.html?email=${encodeURIComponent(email)}">Digitar o código</a>`;
+      } else RP.showAlert(msg, err.data && err.data.status ? 'info' : 'err', err.message);
+    }
+  });
+});
+</script>
+</body>
+</html>

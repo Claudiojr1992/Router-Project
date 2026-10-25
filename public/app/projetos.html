@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projetos · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+<script src="/js/planilha.js"></script>
+</head>
+<body>
+<script>
+const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
+const ICO_REL = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>';
+const TIPO = { tecnico: ['Técnico', 'tec'], coordenacao: ['Coordenação', 'coo'], administrativo: ['Administrativo', 'adm'] };
+let mon = new Map();
+let S, user, pessoas = [], proj = null, filtro = { q: '', uf: '', resp: '', et: '' };
+
+(async () => {
+  S = await Shell.init({ key: 'projetos', title: 'Projetos', sub: 'Cada contrato é um projeto: endereços e as atividades de cada um', perfis: Shell.ESC });
+  user = S.user;
+  pessoas = await RP.api('/pessoas');
+  const id = new URLSearchParams(location.search).get('id');
+  if (id) abrir(+id); else lista();
+})();
+
+async function lista() {
+  history.replaceState(null, '', '/app/projetos.html');
+  S.sub.textContent = 'Cada contrato é um projeto: endereços e as atividades de cada um';
+  S.actions.innerHTML = '';
+  const ps = await RP.api('/projetos');
+  if (!ps.length) { S.content.innerHTML = '<div class="card empty">Nenhum projeto ainda. Cadastre um cliente e um contrato em Clientes.</div>'; return; }
+  S.content.innerHTML = `<div class="grid2">${ps.map((p) => {
+    const pct = p.tarefas ? Math.round(p.concluidas / p.tarefas * 100) : 0;
+    return `<button class="card ccard" data-id="${p.id}">
+      <div class="row"><span class="pill">${RP.esc(p.cliente)}</span><span class="pill">${p.tipo === 'aditivo' ? 'Aditivo' : 'Contrato principal'}</span></div>
+      <h3>${RP.esc(p.numero)}</h3><div class="muted">${RP.esc(p.objeto || '')}</div>
+      <div class="row muted" style="font-size:.9rem"><span>${RP.fmtN(p.enderecos)} endereços</span>·<span>${RP.fmtN(p.cameras)} câmeras</span>·<span>${RP.fmtN(p.sem_responsavel)} sem responsável</span></div>
+      <div class="row"><div class="bar" style="flex:1"><i style="width:${pct}%"></i></div><b>${pct}%</b></div></button>`;
+  }).join('')}</div>`;
+  RP.$$('.ccard', S.content).forEach((b) => (b.onclick = () => abrir(+b.dataset.id)));
+}
+
+async function abrir(id) {
+  [proj] = await Promise.all([RP.api('/projetos/' + id), carregarMon(id)]);
+  history.replaceState(null, '', '/app/projetos.html?id=' + id);
+  S.sub.textContent = `${proj.contrato.cliente} · ${proj.contrato.numero}`;
+  const gestor = Shell.acao('distribuir');
+  S.actions.innerHTML = `<button class="btn sm" id="voltar">← Projetos</button><button class="btn sm" id="monl" title="Planilha de ativos, importação e envio ao Zabbix">Monitoramento</button>${gestor ? '<button class="btn sm primary" id="dist">Distribuir atividades</button>' : ''}`;
+  RP.$('#voltar').onclick = lista;
+  RP.$('#monl').onclick = monLote;
+  if (gestor) RP.$('#dist').onclick = distribuir;
+  render();
+}
+
+function render() {
+  const all = proj.enderecos.flatMap((e) => e.tarefas);
+  const conc = all.filter((t) => t.status === 'concluida').length;
+  const sem = all.filter((t) => !t.responsavel_id).length;
+  const deleg = all.filter((t) => t.responsavel_tipo && t.responsavel_tipo !== 'tecnico').length;
+  const ufs = [...new Set(proj.enderecos.map((e) => e.uf))].sort();
+  const q = filtro.q.toLowerCase();
+  const etps = [...new Map(proj.enderecos.filter((e) => e.etapa_id).map((e) => [e.etapa_id, e])).values()];
+  const ends = proj.enderecos.filter((e) => (!filtro.uf || e.uf === filtro.uf) && (!filtro.et || (filtro.et === 'sem' ? !e.etapa_id : String(e.etapa_id) === filtro.et)) &&
+    (!q || (e.nome + ' ' + e.municipio + ' ' + (e.codigo || '')).toLowerCase().includes(q)) &&
+    (!filtro.resp || e.tarefas.some((t) => (filtro.resp === 'none' ? !t.responsavel_id : String(t.responsavel_id) === filtro.resp))));
+  const itensCt = proj.itens || [];
+  const cols = `minmax(210px,1.3fr) minmax(170px,230px) 150px repeat(${proj.atividades.length}, minmax(150px,1fr))`;
+  S.content.innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><span>Endereços</span><b>${RP.fmtN(proj.enderecos.length)}</b></div>
+      <div class="kpi"><span>Atividades concluídas</span><b>${RP.fmtN(conc)} <small class="muted" style="font-size:1rem">de ${RP.fmtN(all.length)}</small></b></div>
+      <div class="kpi"><span>Sem responsável</span><b style="color:${sem ? 'var(--warn)' : 'inherit'}">${RP.fmtN(sem)}</b></div>
+      <div class="kpi"><span>Delegadas (fora do campo)</span><b>${RP.fmtN(deleg)}</b></div>
+    </div>
+    <div class="card">
+      <header class="toolbar">
+        <input class="input" id="q" placeholder="Buscar endereço ou município" value="${RP.esc(filtro.q)}" aria-label="Buscar">
+        <select class="input" id="uf" style="max-width:160px" aria-label="UF"><option value="">Todas as UFs</option>${ufs.map((u) => `<option ${u === filtro.uf ? 'selected' : ''}>${u}</option>`).join('')}</select>
+        ${etps.length ? `<select class="input" id="fet" style="max-width:200px" aria-label="Etapa"><option value="">Todas as etapas</option><option value="sem" ${filtro.et === 'sem' ? 'selected' : ''}>Sem etapa</option>${etps.map((e) => `<option value="${e.etapa_id}" ${String(e.etapa_id) === filtro.et ? 'selected' : ''}>${RP.esc(e.etapa)} · ${RP.fmtData(e.etapa_inicio)}</option>`).join('')}</select>` : ''}
+        <select class="input" id="resp" style="max-width:220px" aria-label="Responsável"><option value="">Qualquer responsável</option><option value="none" ${filtro.resp === 'none' ? 'selected' : ''}>Sem responsável</option>
+          ${pessoas.filter((p) => p.ativo).map((p) => `<option value="${p.id}" ${String(p.id) === filtro.resp ? 'selected' : ''}>${RP.esc(p.nome)}</option>`).join('')}</select>
+        <span class="spacer"></span><span class="muted">${ends.length} endereço(s)</span>
+      </header>
+      <div class="scroll" style="max-height:calc(100vh - 330px)">
+        <div class="matrix" style="grid-template-columns:${cols};min-width:${590 + proj.atividades.length * 150}px">
+          <div class="mh">Endereço</div><div class="mh" title="Quantidade de cada item do contrato neste endereço · role para o lado">Itens do contrato</div><div class="mh" title="Subir os ativos para o Zabbix depois que todas as atividades forem concluídas">Monitoramento</div>${proj.atividades.map((a) => `<div class="mh" title="${RP.esc(a.nome)}">${RP.esc(a.curto || a.nome)}</div>`).join('')}
+          ${ends.map((e) => `<div class="mc"><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.municipio)}/${e.uf} · ${RP.esc(e.status)}${e.tarefas.some((t) => t.fotos) ? ` · <a href="/api/enderecos/${e.id}/evidencias.zip" title="Baixar fotos e relatórios deste endereço">evidências</a>` : ''}</div>${e.etapa ? `<div style="font-size:.78rem;color:var(--accent)">${RP.esc(e.etapa)}${e.ordem_etapa ? ' · ' + e.ordem_etapa + 'º' : ''} · início ${RP.fmtData(e.etapa_inicio)}</div>` : ''}</div>
+            <div class="mc"><div class="itroll" tabindex="0" aria-label="Itens do contrato em ${RP.esc(e.nome)}">${itensCt.length ? itensCt.map((i) => { const n = (e.itens || {})[i.id] || 0; return `<span class="itq${n ? '' : ' z'}" title="${RP.esc(i.nome)}: ${n}"><b>${RP.fmtN(n)}</b>${RP.esc(i.nome)}</span>`; }).join('') : `<span class="itq"><b>${RP.fmtN(e.cameras)}</b>Câmeras</span>`}</div></div>
+            <div class="mc">${monChip(e)}</div>
+            ${proj.atividades.map((a) => { const t = e.tarefas.find((x) => x.atividade_id === a.id); if (!t) return '<div class="mc"></div>';
+              const pre = a.predecessora_id && t.status !== 'concluida' ? e.tarefas.find((x) => x.atividade_id === a.predecessora_id) : null;
+              const bloq = pre && pre.status !== 'concluida' ? proj.atividades.find((x) => x.id === a.predecessora_id) : null;
+              const rel = t.status === 'concluida' ? 'final' : (t.ck_feitos || t.fotos || t.status !== 'a_fazer' ? 'parcial' : '');
+              return `<div class="mc"><div class="cellw"><button class="cell ${t.responsavel_id ? '' : 'none'}" data-t="${t.id}"><span class="pill ${t.status}"><i></i>${ST[t.status]}</span>
+                <small>${t.responsavel ? RP.esc(t.responsavel) + (t.responsavel_tipo !== 'tecnico' ? ' · ' + TIPO[t.responsavel_tipo][0] : '') : 'Sem responsável'}</small>
+                ${bloq ? `<small class="lock" title="Só pode ser concluída depois de: ${RP.esc(bloq.nome)}">🔒 aguarda ${RP.esc(bloq.curto || bloq.nome)}</small>` : ''}
+                ${t.ck_total || t.fotos ? `<small class="ckp">${t.ck_total ? `Checklist ${t.ck_feitos}/${t.ck_total}` : ''}${t.ck_total && t.fotos ? ' · ' : ''}${t.fotos ? `${t.fotos} foto(s)` : ''}</small>` : ''}</button>
+                ${rel ? `<a class="relico ${rel}" href="/api/tarefas/${t.id}/relatorio.pdf" target="_blank" rel="noopener" title="${rel === 'final' ? 'Relatório final (PDF)' : 'Relatório parcial (PDF)'}" aria-label="${rel === 'final' ? 'Relatório final' : 'Relatório parcial'}">${ICO_REL}</a>` : ''}</div></div>`; }).join('')}`).join('')}
+        </div>
+        ${ends.length ? '' : '<div class="empty">Nenhum endereço com esses filtros.</div>'}
+      </div>
+    </div>`;
+  const q$ = RP.$('#q'); q$.oninput = () => { filtro.q = q$.value; clearTimeout(q$._t); q$._t = setTimeout(() => { render(); RP.$('#q').focus(); RP.$('#q').setSelectionRange(99, 99); }, 250); };
+  RP.$('#uf').onchange = (e) => { filtro.uf = e.target.value; render(); };
+  RP.$('#resp').onchange = (e) => { filtro.resp = e.target.value; render(); };
+  RP.$('#fet')?.addEventListener('change', (e) => { filtro.et = e.target.value; render(); });
+  RP.$$('.cell', S.content).forEach((b) => (b.onclick = () => editar(+b.dataset.t)));
+  RP.$$('[data-mon]', S.content).forEach((b) => (b.onclick = () => monitorar(+b.dataset.mon)));
+}
+
+// ---------- Monitoramento (Zabbix) ----------
+async function carregarMon(id) { mon = new Map((await RP.api(`/contratos/${id}/monitoramento`).catch(() => [])).map((m) => [m.endereco_id, m])); }
+function monEstado(e) {
+  const m = mon.get(e.id) || { ativos: 0, enviados: 0, erros: 0 };
+  const tot = e.tarefas.length, con = e.tarefas.filter((t) => t.status === 'concluida').length;
+  if (m.ativos && m.enviados === m.ativos) return ['No Zabbix ✓', 'var(--ok)', `${m.enviados} host(s) monitorados`];
+  if (m.erros) return ['Erro no envio', 'var(--err)', `${m.erros} ativo(s) com erro`];
+  if (tot && con < tot) return [`Atividades ${con}/${tot}`, 'var(--muted)', 'Sobe para o monitoramento quando todas as atividades forem concluídas'];
+  if (!m.ativos) return ['Cadastrar ativos', 'var(--warn)', 'Atividades concluídas: informe hostname e IP dos ativos'];
+  return ['Pronto para subir', 'var(--info)', `${m.ativos} ativo(s) prontos para o Zabbix`];
+}
+function monChip(e) { const [t, c, d] = monEstado(e); return `<button type="button" class="mnchip" style="--c:${c}" data-mon="${e.id}" title="${RP.esc(d)}"><i></i>${t}</button>`; }
+
+const TIPOS_AT = ['camera', 'nvr', 'servidor', 'switch', 'nobreak', 'roteador', 'link', 'alarme', 'outro'];
+const IFS = [['snmp', 'SNMP'], ['agent', 'Agente'], ['icmp', 'Só ping']];
+async function monitorar(eid) {
+  const d = await RP.api(`/enderecos/${eid}/monitoramento`);
+  const e = proj.enderecos.find((x) => x.id === eid) || d.endereco;
+  const pad = d.zabbix.padrao || {};
+  let linhas = d.ativos.map((a) => ({ ...a }));
+  const pronto = d.tarefas.pronto, admin = Shell.acao('forcar_monitoramento');
+  const linha = (a, i) => `<tr data-r="${i}">
+    <td><input class="input" data-k="hostname" value="${RP.esc(a.hostname || '')}" placeholder="BNB001-CAM01" aria-label="Hostname"></td>
+    <td><input class="input" data-k="ip" value="${RP.esc(a.ip || '')}" placeholder="10.0.0.10" inputmode="decimal" aria-label="IP"></td>
+    <td><select class="input" data-k="tipo" aria-label="Tipo">${TIPOS_AT.map((t) => `<option ${t === (a.tipo || 'camera') ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+    <td><select class="input" data-k="interface" aria-label="Interface">${IFS.map(([k, l]) => `<option value="${k}" ${k === (a.interface || 'snmp') ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+    <td><input class="input" data-k="porta" value="${a.porta || ''}" placeholder="padrão" inputmode="numeric" style="width:76px" aria-label="Porta"></td>
+    <td><input class="input" data-k="grupo" value="${RP.esc(a.grupo || '')}" placeholder="${RP.esc(pad.grupo || 'RoutProject')}" list="zb-grupos" aria-label="Grupo"></td>
+    <td><input class="input" data-k="template" value="${RP.esc(a.template || '')}" placeholder="padrão" list="zb-tpls" aria-label="Template"></td>
+    <td style="white-space:nowrap;font-size:.78rem">${a.status === 'enviado' ? '<span style="color:var(--ok);font-weight:700">✓ no Zabbix</span>' : a.status === 'erro' ? `<span style="color:var(--err);font-weight:700" title="${RP.esc(a.erro || '')}">erro</span>` : '<span class="muted">pendente</span>'}</td>
+    <td><button type="button" class="btn sm danger" data-del="${i}" aria-label="Remover ativo">×</button></td></tr>`;
+  const dr = RP.drawer(`Monitoramento · ${e.nome}`, `
+    <div class="row" style="gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <span class="pjbadge" style="--c:${pronto ? 'var(--ok)' : 'var(--warn)'}"><i></i>${pronto ? 'Atividades concluídas' : `Atividades ${d.tarefas.concluidas}/${d.tarefas.total}`}</span>
+      <span class="pjbadge" style="--c:${d.zabbix.configurado ? 'var(--info)' : 'var(--err)'}"><i></i>${d.zabbix.configurado ? 'Zabbix conectado' : 'Zabbix não configurado'}</span>
+      ${d.endereco.monitorado_em ? `<span class="pjbadge" style="--c:var(--ok)"><i></i>Monitorado desde ${RP.fmtDataHora(d.endereco.monitorado_em)}</span>` : ''}
+    </div>
+    <p class="muted" style="margin:0 0 10px;font-size:.88rem">Cada ativo vira um host no Zabbix, com o endereço no inventário e as tags do projeto. Depois que <b>todas as atividades</b> estiverem concluídas, use “Subir para o Zabbix”. Para muitos endereços, use o botão <b>Monitoramento</b> no topo (planilha modelo).${d.zabbix.configurado ? '' : ' Configure a conexão em <a href="/app/conexoes.html">Conexões</a>.'}</p>
+    <div class="row" style="gap:8px;margin-bottom:8px"><button type="button" class="btn sm" id="mn-add">+ Ativo</button><button type="button" class="btn sm" id="mn-cam" title="Cria uma linha por câmera do endereço, com o hostname pronto">Gerar pelas câmeras (${e.cameras || 0})</button></div>
+    <div class="scroll" style="border:1px solid var(--line);border-radius:10px;max-height:46vh"><table class="tbl mntbl"><thead><tr><th>Hostname</th><th>IP</th><th>Tipo</th><th>Interface</th><th>Porta</th><th>Grupo</th><th>Template</th><th>Situação</th><th></th></tr></thead><tbody id="mn-b"></tbody></table></div>
+    <datalist id="zb-grupos"></datalist><datalist id="zb-tpls"></datalist>
+    <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button type="button" class="btn primary" id="mn-env" ${d.zabbix.configurado && (pronto || admin) ? '' : 'disabled'}>Salvar e subir para o Zabbix</button>
+      ${!pronto && admin ? '<label class="check" style="margin:0"><input type="checkbox" id="mn-f"> Subir mesmo sem concluir as atividades (administrador)</label>' : ''}
+    </div>
+    ${d.historico.length ? `<h3 style="font-size:1rem;margin:16px 0 6px">Histórico</h3><ul class="mnlog">${d.historico.map((h) => `<li><b style="color:${h.ok ? 'var(--ok)' : 'var(--err)'}">${h.ok ? '✓' : '✗'}</b> ${RP.fmtDataHora(h.criado_em)} · ${RP.esc(h.usuario || '')} · <span style="white-space:pre-wrap">${RP.esc(h.detalhe || '')}</span></li>`).join('')}</ul>` : ''}`, {
+    saveLabel: 'Salvar ativos',
+    onSave: async () => { await salvarAtivos(); RP.toast('Ativos salvos'); await carregarMon(proj.contrato.id); render(); },
+  });
+  dr.el.classList.add('wide');
+  const el = dr.el, tb = RP.$('#mn-b', el);
+  const ler = () => RP.$$('tr[data-r]', tb).forEach((tr) => { const a = linhas[+tr.dataset.r]; RP.$$('[data-k]', tr).forEach((x) => (a[x.dataset.k] = x.value.trim())); });
+  const desenhar = () => {
+    tb.innerHTML = linhas.length ? linhas.map(linha).join('') : '<tr><td colspan="9" class="empty">Nenhum ativo. Use “+ Ativo” ou “Gerar pelas câmeras”.</td></tr>';
+    RP.$$('[data-del]', tb).forEach((b) => (b.onclick = () => { ler(); linhas.splice(+b.dataset.del, 1); desenhar(); }));
+  };
+  const salvarAtivos = async () => { ler(); await RP.api(`/enderecos/${eid}/monitoramento`, { method: 'PUT', body: { ativos: linhas.map((a) => ({ ...a, porta: a.porta || null })) } }); };
+  desenhar();
+  RP.$('#mn-add', el).onclick = () => { ler(); linhas.push({ interface: 'snmp', tipo: 'camera' }); desenhar(); RP.$$('tr[data-r] [data-k="hostname"]', tb).pop()?.focus(); };
+  RP.$('#mn-cam', el).onclick = () => {
+    ler(); const base = (e.codigo || e.nome).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').toUpperCase();
+    const n = e.cameras || 0; if (!n) return RP.toast('Este endereço não tem câmeras cadastradas');
+    for (let i = 1; i <= n; i++) { const h = `${base}-CAM${String(i).padStart(2, '0')}`; if (!linhas.some((a) => a.hostname === h)) linhas.push({ hostname: h, tipo: 'camera', interface: 'snmp' }); }
+    desenhar(); RP.toast(`${n} linha(s) de câmera. Preencha os IPs.`);
+  };
+  RP.$('#mn-env', el).onclick = (ev) => RP.busy(ev.currentTarget, async () => {
+    try {
+      await salvarAtivos();
+      const r = await RP.api(`/enderecos/${eid}/monitoramento/enviar`, { method: 'POST', body: { forcar: !!RP.$('#mn-f', el)?.checked } });
+      RP.toast(r.erros.length ? `${r.enviados} enviado(s), ${r.erros.length} com erro: ${r.erros[0]}` : `${r.enviados} host(s) no Zabbix`);
+      await carregarMon(proj.contrato.id); render(); dr.close(); monitorar(eid);
+    } catch (e2) { RP.toast(e2.message); }
+  });
+  if (d.zabbix.configurado) RP.api('/conexoes/zabbix/opcoes').then((o) => {
+    RP.$('#zb-grupos', el).innerHTML = o.grupos.map((g) => `<option value="${RP.esc(g)}">`).join('');
+    RP.$('#zb-tpls', el).innerHTML = o.templates.map((t) => `<option value="${RP.esc(t)}">`).join('');
+  }).catch(() => {});
+}
+
+// Planilha modelo, importação e envio dos prontos do contrato
+const CAB_MON = ['Código do endereço', 'Endereço', 'Hostname', 'IP', 'Tipo', 'Interface', 'Porta', 'Grupo', 'Template', 'Comunidade SNMP'];
+function monLote() {
+  const ends = proj.enderecos;
+  const est = ends.map((e) => monEstado(e)[0]);
+  const n = (f) => est.filter(f).length;
+  const dr = RP.drawer('Monitoramento do contrato', `
+    <div class="kpis" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
+      <div class="kpi"><span>No Zabbix</span><b style="color:var(--ok)">${n((x) => x.startsWith('No Zabbix'))}</b></div>
+      <div class="kpi"><span>Prontos para subir</span><b style="color:var(--info)">${n((x) => x === 'Pronto para subir')}</b></div>
+      <div class="kpi"><span>Cadastrar ativos</span><b style="color:var(--warn)">${n((x) => x === 'Cadastrar ativos')}</b></div>
+      <div class="kpi"><span>Aguardando atividades</span><b>${n((x) => x.startsWith('Atividades'))}</b></div>
+    </div>
+    <h3 style="font-size:1.05rem;margin:0 0 6px">1. Baixe o modelo</h3>
+    <p class="muted" style="margin:0 0 8px;font-size:.88rem">Uma linha por ativo (câmera, NVR, switch…). Use o <b>código do endereço</b> para ligar o ativo ao endereço. O modelo já vem com os endereços deste contrato e os ativos cadastrados.</p>
+    <button type="button" class="btn sm" id="ml-mod">Baixar modelo (.xlsx)</button>
+    <h3 style="font-size:1.05rem;margin:18px 0 6px">2. Importe a planilha preenchida</h3>
+    <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><input type="file" id="ml-f" accept=".xlsx,.csv" class="input" style="max-width:340px">
+      <label class="check" style="margin:0"><input type="checkbox" id="ml-sub"> Substituir os ativos dos endereços da planilha</label></div>
+    <p id="ml-p" class="muted" style="font-size:.85rem"></p>
+    <button type="button" class="btn sm" id="ml-imp" disabled>Importar ativos</button>
+    <h3 style="font-size:1.05rem;margin:18px 0 6px">3. Suba para o Zabbix</h3>
+    <p class="muted" style="margin:0 0 8px;font-size:.88rem">Envia todos os endereços com <b>todas as atividades concluídas</b> e ativos pendentes. Para um endereço só, clique na situação dele na coluna Monitoramento.</p>
+    <button type="button" class="btn primary" id="ml-env">Subir os prontos para o Zabbix</button>
+    <div id="ml-r" style="margin-top:10px"></div>`, { saveLabel: 'Fechar', onSave: async () => {} });
+  const el = dr.el; let linhas = null;
+  RP.$('#ml-mod', el).onclick = async () => {
+    const atv = await RP.api(`/contratos/${proj.contrato.id}/monitoramento`);
+    const rows = [];
+    for (const e of ends) {
+      const m = mon.get(e.id);
+      if (m && m.ativos) { const d = await RP.api(`/enderecos/${e.id}/monitoramento`); d.ativos.forEach((a) => rows.push([e.codigo || '', e.nome, a.hostname, a.ip, a.tipo, a.interface, a.porta || '', a.grupo || '', a.template || '', a.comunidade || ''])); }
+      else rows.push([e.codigo || '', e.nome, '', '', 'camera', 'snmp', '', '', '', '']);
+    }
+    const instr = [['Como preencher'], ['Código do endereço: o mesmo código cadastrado em Clientes → Endereços (obrigatório para ligar o ativo).'], ['Hostname: nome único do host no Zabbix (letras, números, ponto, hífen, sublinhado).'], ['IP: endereço IP do ativo.'],
+      ['Tipo: camera, nvr, servidor, switch, nobreak, roteador, link, alarme ou outro.'], ['Interface: snmp, agent (agente Zabbix) ou icmp (só ping).'], ['Porta: em branco usa 161 (SNMP) ou 10050 (agente).'],
+      ['Grupo e Template: em branco usam os padrões definidos em Conexões. O grupo é criado no Zabbix se não existir.'], ['Comunidade SNMP: em branco usa a padrão de Conexões.'], ['Duplique a linha do endereço para cada ativo dele.'], [`Gerado em ${new Date().toLocaleString('pt-BR')} · ${atv.length} endereço(s).`]];
+    Planilha.baixar(Planilha.xlsx([{ nome: 'Ativos', linhas: [CAB_MON, ...rows], larguras: [16, 30, 24, 16, 12, 12, 8, 22, 26, 18] }, { nome: 'Instruções', linhas: instr, larguras: [110] }]),
+      `Monitoramento_${proj.contrato.cliente}_${proj.contrato.numero}.xlsx`.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9._-]+/g, '_'));
+  };
+  RP.$('#ml-f', el).onchange = async (ev) => {
+    const f = ev.target.files[0]; if (!f) return;
+    try {
+      const m = await Planilha.ler(f);
+      const norm = (x) => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+      const cab = (m[0] || []).map(norm);
+      const col = (...ns) => cab.findIndex((c) => ns.some((n) => c === n || c.startsWith(n)));
+      const ix = { codigo: col('codigo do endereco', 'codigo', 'cod'), endereco: col('endereco', 'agencia', 'nome'), hostname: col('hostname', 'host'), ip: col('ip'), tipo: col('tipo'), interface: col('interface'), porta: col('porta'), grupo: col('grupo'), template: col('template'), comunidade: col('comunidade') };
+      if (ix.hostname < 0 || ix.ip < 0) throw new Error('A planilha precisa das colunas Hostname e IP (use o modelo)');
+      linhas = m.slice(1).filter((r) => r.some((c) => String(c).trim())).filter((r) => String(r[ix.hostname] || '').trim() || String(r[ix.ip] || '').trim())
+        .map((r) => Object.fromEntries(Object.entries(ix).map(([k, i]) => [k, i >= 0 ? String(r[i] ?? '').trim() : ''])));
+      RP.$('#ml-p', el).textContent = `${linhas.length} ativo(s) em ${new Set(linhas.map((l) => l.codigo || l.endereco)).size} endereço(s). Linhas sem hostname e IP são ignoradas.`;
+      RP.$('#ml-imp', el).disabled = !linhas.length;
+    } catch (e2) { RP.$('#ml-p', el).textContent = e2.message; linhas = null; RP.$('#ml-imp', el).disabled = true; }
+  };
+  RP.$('#ml-imp', el).onclick = (ev) => RP.busy(ev.currentTarget, async () => {
+    try {
+      const r = await RP.api(`/contratos/${proj.contrato.id}/monitoramento/importar`, { method: 'POST', body: { linhas: linhas.map((l) => ({ ...l, porta: l.porta || null })), substituir: RP.$('#ml-sub', el).checked } });
+      RP.toast(`${r.criados} ativo(s) novos e ${r.atualizados} atualizados em ${r.enderecos} endereço(s)`);
+      await carregarMon(proj.contrato.id); render();
+    } catch (e2) { RP.$('#ml-p', el).textContent = e2.message; RP.toast('A planilha tem erros'); }
+  });
+  RP.$('#ml-env', el).onclick = (ev) => RP.busy(ev.currentTarget, async () => {
+    try {
+      const r = await RP.api(`/contratos/${proj.contrato.id}/monitoramento/enviar`, { method: 'POST', body: {} });
+      RP.$('#ml-r', el).innerHTML = `<p><b>${r.enderecos}</b> endereço(s) processados · <b style="color:var(--ok)">${r.enviados}</b> host(s) no Zabbix.</p>${r.com_erro.length ? `<ul class="mnlog">${r.com_erro.map((x) => `<li><b>${RP.esc(x.nome || '')}</b>: ${RP.esc(x.erros.join('; '))}</li>`).join('')}</ul>` : ''}`;
+      await carregarMon(proj.contrato.id); render();
+    } catch (e2) { RP.toast(e2.message); }
+  });
+}
+
+function opcoesPessoas(sel) {
+  const g = (tipo) => pessoas.filter((p) => p.ativo && p.tipo === tipo);
+  return `<option value="">Sem responsável</option>` + ['tecnico', 'coordenacao', 'administrativo'].map((t) => g(t).length ?
+    `<optgroup label="${TIPO[t][0]}">${g(t).map((p) => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${RP.esc(p.nome)}${p.area ? ' · ' + RP.esc(p.area) : ''}</option>`).join('')}</optgroup>` : '').join('');
+}
+
+function duracao(a, b) {
+  if (!a || !b) return '—';
+  const min = Math.max(0, Math.round((new Date(b) - new Date(a)) / 60000)), d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60);
+  return [d ? d + ' d' : '', h ? h + ' h' : '', (min % 60) + ' min'].filter(Boolean).join(' ');
+}
+
+const checklistHtml = (c) => RP.checklistHtml(c);
+
+async function editar(tid) {
+  let t, e;
+  for (const en of proj.enderecos) { const x = en.tarefas.find((y) => y.id === tid); if (x) { t = x; e = en; break; } }
+  const a = proj.atividades.find((x) => x.id === t.atividade_id);
+  const d = RP.drawer(a.nome, `
+    <p class="muted" style="margin-top:0">${RP.esc(e.nome)} · ${RP.esc(e.municipio)}/${e.uf} · ${e.cameras} câmeras</p>
+    <div class="field"><label for="d-resp">Responsável</label><select class="input" id="d-resp">${opcoesPessoas(t.responsavel_id)}</select>
+      <small>Pode ser técnico, coordenação ou alguém do administrativo (ex.: handover).</small></div>
+    <div class="field"><label for="d-st">Status</label><select class="input" id="d-st" ${t.status === 'concluida' && !Shell.acao('reabrir') ? 'disabled title="Só a coordenação ou a supervisão reabre atividade concluída"' : ''}>${Object.entries(ST).map(([k, v]) => `<option value="${k}" ${k === t.status ? 'selected' : ''}>${v}</option>`).join('')}</select>${t.status === 'concluida' ? `<small>${Shell.acao('reabrir') ? 'Concluída. Para reabrir, escolha outro status (fica registrado no histórico).' : '🔒 Concluída. Só a coordenação ou a supervisão pode reabrir.'}</small>` : ''}</div>
+    <div class="exec"><div><span>Início real</span><b>${t.realizada_inicio ? RP.fmtDataHora(t.realizada_inicio) : '—'}</b></div>
+      <div><span>Conclusão real</span><b>${t.realizada_fim ? RP.fmtDataHora(t.realizada_fim) : '—'}</b></div>
+      <div><span>Duração</span><b>${duracao(t.realizada_inicio, t.realizada_fim)}</b></div></div>
+    <p class="muted" style="font-size:.82rem;margin:-6px 0 12px">Preenchidos sozinhos quando o técnico toca em Iniciar e em Concluir (no app ou aqui, mudando o status).</p>
+    <div class="row"><div class="field" style="flex:1"><label for="d-i">Início previsto</label><input class="input" type="date" id="d-i" value="${t.prevista_inicio || ''}"></div>
+      <div class="field" style="flex:1"><label for="d-f">Fim previsto</label><input class="input" type="date" id="d-f" value="${t.prevista_fim || ''}"></div></div>
+    <div class="row" style="gap:8px;margin-bottom:14px"><a class="btn sm ${t.status === 'concluida' ? 'primary' : ''}" href="/api/tarefas/${t.id}/relatorio.pdf" target="_blank" rel="noopener">${ICO_REL} ${t.status === 'concluida' ? 'Relatório final (PDF)' : 'Relatório parcial (PDF)'}</a>
+      <a class="btn sm" href="/api/tarefas/${t.id}/relatorio.pdf?baixar=1">Baixar</a>
+      ${t.fotos ? `<a class="btn sm" href="/api/tarefas/${t.id}/evidencias.zip" title="Fotos e relatório desta atividade">Evidências (.zip)</a>` : ''}</div>
+    <div class="assbox" id="d-ass"><span class="muted">Assinatura do cliente: carregando…</span></div>
+    <h3 style="font-size:1.05rem;margin:18px 0 8px">Checklist</h3><div id="d-ck" class="muted">Carregando…</div>
+    <div class="field"><label for="d-c">Comentário</label><textarea class="input" id="d-c" placeholder="Opcional — fica no histórico"></textarea></div>
+    <h3 style="font-size:1.05rem;margin:18px 0 8px">Fotos</h3><div id="d-fotos" class="muted">Carregando…</div>
+    <h3 style="font-size:1.05rem;margin:18px 0 8px">Histórico</h3><div id="d-h" class="muted">Carregando…</div>`, {
+    onSave: async (el) => {
+      const body = {};
+      const r = RP.$('#d-resp', el).value; const nr = r ? +r : null;
+      if (nr !== t.responsavel_id) body.responsavel_id = nr;
+      const s = RP.$('#d-st', el).value; if (s !== t.status) body.status = s;
+      const i = RP.$('#d-i', el).value || null, f = RP.$('#d-f', el).value || null;
+      if (i !== (t.prevista_inicio || null) || f !== (t.prevista_fim || null)) { body.prevista_inicio = i; body.prevista_fim = f; }
+      if (Object.keys(body).length) {
+        const n = await RP.api('/tarefas/' + tid, { method: 'PATCH', body });
+        Object.assign(t, { status: n.status, responsavel_id: n.responsavel_id, responsavel: n.responsavel, responsavel_tipo: n.responsavel_tipo, prevista_inicio: n.prevista_inicio, prevista_fim: n.prevista_fim });
+      }
+      const c = RP.$('#d-c', el).value.trim();
+      if (c) await RP.api(`/tarefas/${tid}/comentarios`, { method: 'POST', body: { texto: c } });
+      render(); RP.toast('Atividade atualizada');
+    },
+  });
+  assinaturaBox(tid, RP.$('#d-ass', d.el));
+  RP.api(`/tarefas/${tid}/checklist`).then((c) => { RP.$('#d-ck', d.el).innerHTML = checklistHtml(c); }).catch(() => { RP.$('#d-ck', d.el).textContent = ''; });
+  const ev = await RP.api(`/tarefas/${tid}/eventos`);
+  RP.api(`/tarefas/${tid}/fotos`).then((fs) => {
+    RP.$('#d-fotos', d.el).innerHTML = fs.length ? `<div class="row" style="gap:8px">${fs.map((f) => `<a href="/api/fotos/${f.id}" target="_blank" rel="noopener" title="${RP.esc((f.item || f.legenda || 'Foto') + ' · ' + RP.fmtDataHora(f.tirada_em || f.criado_em))}"><img src="/api/fotos/${f.id}" alt="${RP.esc(f.item || f.legenda || 'Foto')}" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line)" loading="lazy"></a>`).join('')}</div>` : 'Nenhuma foto enviada pelo app ainda.';
+  }).catch(() => { RP.$('#d-fotos', d.el).textContent = ''; });
+  RP.$('#d-h', d.el).innerHTML = ev.length ? ev.map((x) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b style="color:var(--ink)">${RP.esc(x.usuario || 'Sistema')}</b> · ${RP.fmtDataHora(x.criado_em)}<br>${x.tipo === 'comentario' ? '💬 ' : ''}${RP.esc(x.detalhe)}</div>`).join('') : 'Sem movimentações.';
+}
+
+// Assinatura do relatório pelo cliente: gera um link para enviar por WhatsApp ou e-mail
+async function assinaturaBox(tid, box) {
+  try {
+    const st = await RP.api(`/tarefas/${tid}/assinatura`);
+    box.innerHTML = st.assinado
+      ? `<b class="ok">✓ Assinado pelo cliente</b><span class="muted">${RP.esc(st.assinado.nome)}${st.assinado.cargo ? ' · ' + RP.esc(st.assinado.cargo) : ''} · ${RP.fmtDataHora(st.assinado.assinado_em)}. O relatório em PDF já sai com a assinatura.</span>`
+      : `<b>Assinatura do cliente</b><span class="muted">${st.pendente ? `Link enviado em ${RP.fmtDataHora(st.pendente.criado_em)}, válido até ${RP.fmtData(st.pendente.expira_em)}. Gere outro se precisar reenviar.` : 'O cliente abre o link, confere o relatório e assina com o dedo ou o mouse.'}</span>
+         <button class="btn sm primary" type="button" id="ass-go">${st.pendente ? 'Gerar novo link' : 'Gerar link para assinar'}</button><div id="ass-link"></div>`;
+    RP.$('#ass-go', box)?.addEventListener('click', (ev) => RP.busy(ev.currentTarget, async () => {
+      try {
+        const r = await RP.api(`/tarefas/${tid}/assinatura`, { method: 'POST' });
+        const txt = encodeURIComponent(`Olá! Segue o relatório para conferência e assinatura: ${r.link}`);
+        RP.$('#ass-link', box).innerHTML = `<div class="row" style="gap:6px;margin-top:8px"><input class="input" readonly value="${RP.esc(r.link)}" style="flex:1;min-width:200px" aria-label="Link de assinatura">
+          <button class="btn sm" type="button" id="ass-cp">Copiar</button><a class="btn sm" target="_blank" rel="noopener" href="https://wa.me/?text=${txt}">WhatsApp</a>
+          <a class="btn sm" href="mailto:?subject=${encodeURIComponent('Relatório para assinatura')}&body=${txt}">E-mail</a></div><small class="muted">Válido até ${RP.fmtData(r.expira_em)}.</small>`;
+        RP.$('#ass-cp', box).onclick = async () => { try { await navigator.clipboard.writeText(r.link); RP.toast('Link copiado'); } catch (_) { RP.$('#ass-link input', box).select(); } };
+      } catch (e) { RP.toast(e.message); }
+    }));
+  } catch (_) { box.textContent = ''; }
+}
+
+function distribuir() {
+  RP.drawer('Distribuir atividades', `
+    <p class="muted" style="margin-top:0">Envia uma atividade de todos os endereços deste projeto para uma pessoa de uma vez. Atividades concluídas não mudam.</p>
+    <div class="field"><label for="x-a">Atividade</label><select class="input" id="x-a">${proj.atividades.map((a) => `<option value="${a.id}">${RP.esc(a.nome)}</option>`).join('')}</select></div>
+    <div class="field"><label for="x-p">Enviar para</label><select class="input" id="x-p">${opcoesPessoas(null).replace('<option value="">Sem responsável</option>', '<option value="">Escolha…</option>')}</select></div>
+    <label class="check"><input type="checkbox" id="x-v" checked> Só onde ainda não há responsável</label>
+    <label class="check"><input type="checkbox" id="x-r" checked> Guardar como regra do projeto (vale para endereços novos)</label>
+    ${proj.regras.length ? `<h3 style="font-size:1.05rem;margin:18px 0 8px">Regras atuais</h3>${proj.regras.map((r) => `<div class="muted">${RP.esc(proj.atividades.find((a) => a.id === r.atividade_id)?.nome || '')} → <b style="color:var(--ink)">${RP.esc(r.pessoa || '—')}</b></div>`).join('')}` : ''}`, {
+    saveLabel: 'Distribuir',
+    onSave: async (el) => {
+      const r = await RP.api(`/projetos/${proj.contrato.id}/distribuir`, { method: 'POST', body: {
+        atividade_id: +RP.$('#x-a', el).value, pessoa_id: RP.$('#x-p', el).value ? +RP.$('#x-p', el).value : null,
+        somente_sem_responsavel: RP.$('#x-v', el).checked, salvar_regra: RP.$('#x-r', el).checked } });
+      RP.toast(`${r.atualizadas} atividade(s) enviadas`);
+      await abrir(proj.contrato.id);
+    },
+  });
+}
+</script>
+</body>
+</html>

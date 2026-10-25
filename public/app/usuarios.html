@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usuários e acessos · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+</head>
+<body>
+<script>
+let PERFIS = [], NOMES = {}; // vêm da tela Permissões
+const STATUS = { pendente_email: 'E-mail não confirmado', pendente_aprovacao: 'Aguardando aprovação', ativo: 'Ativo', inativo: 'Desativado' };
+let S, us = [];
+
+(async () => {
+  S = await Shell.init({ key: 'usuarios', title: 'Usuários e acessos', sub: 'Cadastre integrantes, aprove pedidos de acesso e defina o perfil de cada pessoa', perfis: ['admin'] });
+  const pf = await RP.api('/perfis'); PERFIS = pf.perfis.map((p) => p.codigo); NOMES = Object.fromEntries(pf.perfis.map((p) => [p.codigo, p.nome]));
+  S.actions.innerHTML = `${Shell.pode('permissoes') ? '<a class="btn sm" href="/app/permissoes.html">Perfis e permissões</a>' : ''}${Shell.pode('usuarios', 'editar') ? '<button class="btn sm primary" id="novo">+ Novo usuário</button>' : ''}`;
+  RP.$('#novo')?.addEventListener('click', () => editarUsuario(null));
+  carregar();
+})();
+
+async function carregar() { us = await RP.api('/usuarios'); render(); }
+const optPerfis = (sel) => PERFIS.map((p) => `<option value="${p}" ${p === sel ? 'selected' : ''}>${RP.esc(NOMES[p] || p)}</option>`).join('');
+
+function render() {
+  const pend = us.filter((u) => u.status === 'pendente_aprovacao');
+  const outros = us.filter((u) => u.status !== 'pendente_aprovacao');
+  S.content.innerHTML = `
+    <div class="card"><header><h2>Aguardando aprovação</h2><span class="pill" style="color:${pend.length ? 'var(--warn)' : 'var(--muted)'}">${pend.length}</span></header>
+      ${pend.length ? pend.map((u) => `<div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
+        <span class="avatar">${RP.esc(RP.iniciais(u.nome))}</span><div style="flex:1;min-width:180px"><b>${RP.esc(u.nome)}</b><div class="muted" style="font-size:.88rem">${RP.esc(u.email)}${u.empresa ? ' · ' + RP.esc(u.empresa) : ''} · pediu: ${RP.esc(NOMES[u.perfil_solicitado] || u.perfil_solicitado || "—")}</div></div>
+        <select class="input" style="max-width:170px" data-perfil="${u.id}" aria-label="Perfil">${optPerfis(u.perfil_solicitado || 'tecnico')}</select>
+        <button class="btn sm primary" data-ok="${u.id}">Aprovar</button><button class="btn sm danger" data-no="${u.id}">Recusar</button></div>`).join('')
+      : '<div class="empty" style="padding:24px">Nenhum cadastro pendente.</div>'}</div>
+    <div class="card"><header><h2>Todos os usuários</h2></header><div class="scroll"><table class="tbl">
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Situação</th><th>Último acesso</th><th></th></tr></thead>
+      <tbody>${outros.map((u) => `<tr><td><b>${RP.esc(u.nome)}</b>${u.empresa || u.telefone ? `<div class="muted" style="font-size:.82rem">${RP.esc([u.empresa, u.telefone].filter(Boolean).join(' · '))}</div>` : ''}</td><td>${RP.esc(u.email)}</td>
+        <td>${u.status === 'ativo' ? `<select class="input" style="min-height:34px;padding:4px 8px;max-width:170px" data-mud="${u.id}" aria-label="Perfil">${optPerfis(u.perfil)}</select>` : RP.esc(NOMES[u.perfil] || u.perfil)}</td>
+        <td>${STATUS[u.status]}</td><td>${RP.fmtDataHora(u.ultimo_acesso)}</td>
+        <td style="white-space:nowrap"><button class="btn sm" data-ed="${u.id}">Editar</button> ${u.id === S.user.id ? '<span class="muted">você</span>' : u.status === 'ativo' ? `<button class="btn sm danger" data-off="${u.id}">Desativar</button>`
+          : u.status === 'inativo' ? `<button class="btn sm" data-on="${u.id}" data-p="${u.perfil}">Reativar</button>` : `<button class="btn sm danger" data-no="${u.id}">Excluir</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
+  const acao = (sel, fn) => RP.$$(sel, S.content).forEach((b) => (b.onclick = () => RP.busy(b, async () => { try { await fn(b); await carregar(); } catch (e) { RP.toast(e.message); } })));
+  acao('[data-ok]', async (b) => { await RP.api(`/usuarios/${b.dataset.ok}/aprovar`, { method: 'POST', body: { perfil: RP.$(`[data-perfil="${b.dataset.ok}"]`).value } }); RP.toast('Acesso liberado'); });
+  acao('[data-no]', async (b) => { if (!confirm('Recusar e apagar este cadastro?')) throw new Error('Cancelado'); await RP.api('/usuarios/' + b.dataset.no, { method: 'DELETE' }); RP.toast('Cadastro removido'); });
+  acao('[data-off]', async (b) => { if (!confirm('Desativar o acesso desta pessoa?')) throw new Error('Cancelado'); await RP.api('/usuarios/' + b.dataset.off, { method: 'PATCH', body: { status: 'inativo' } }); RP.toast('Acesso desativado'); });
+  acao('[data-on]', async (b) => { await RP.api(`/usuarios/${b.dataset.on}/aprovar`, { method: 'POST', body: { perfil: b.dataset.p } }); RP.toast('Acesso reativado'); });
+  RP.$$('[data-ed]', S.content).forEach((b) => (b.onclick = () => editarUsuario(us.find((u) => u.id === +b.dataset.ed))));
+  RP.$$('[data-mud]', S.content).forEach((s) => (s.onchange = async () => {
+    try { await RP.api('/usuarios/' + s.dataset.mud, { method: 'PATCH', body: { perfil: s.value } }); RP.toast('Perfil alterado'); } catch (e) { RP.toast(e.message); carregar(); }
+  }));
+}
+
+// senha inicial forte e fácil de ditar: 3 sílabas + 4 números
+function gerarSenha() { const s = ['ba', 'ce', 'di', 'fo', 'gu', 'la', 'me', 'ni', 'po', 'ru', 'sa', 'te', 'vi', 'zo']; const r = (n) => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+  return s[r(14)][0].toUpperCase() + s[r(14)].slice(1) + s[r(14)] + s[r(14)] + String(1000 + r(9000)); }
+
+function editarUsuario(u) {
+  const x = u || {}, novo = !u;
+  const ff = (id, l, v2 = '', extra = '') => `<div class="field"><label for="${id}">${l}</label><input class="input" id="${id}" value="${RP.esc(v2 ?? '')}" ${extra}></div>`;
+  const d = RP.drawer(novo ? 'Novo usuário' : 'Editar usuário', `
+    ${novo ? '<p class="muted" style="margin-top:0">O integrante já entra ativo, sem precisar confirmar e-mail. Passe a senha inicial para ele; depois ele troca em “Meus dados”.</p>' : ''}
+    ${ff('u-n', 'Nome', x.nome, 'required autocomplete="off"')}${ff('u-e', 'E-mail de acesso', x.email, 'type="email" required autocomplete="off"')}
+    <div class="row"><div style="flex:1">${ff('u-emp', 'Empresa', x.empresa)}</div><div style="flex:1">${ff('u-t', 'Telefone', x.telefone, 'inputmode="tel"')}</div></div>
+    ${novo ? `<div class="field"><label for="u-p">Perfil</label><select class="input" id="u-p">${optPerfis('tecnico')}</select><small>O que cada perfil pode fazer é definido em Permissões.</small></div>` : ''}
+    <div class="field"><label for="u-s">${novo ? 'Senha inicial' : 'Nova senha (opcional)'}</label><div class="row" style="flex-wrap:nowrap"><input class="input" id="u-s" ${novo ? 'required' : ''} autocomplete="new-password" placeholder="${novo ? '' : 'Deixe em branco para manter'}"><button class="btn sm" type="button" id="u-g">Gerar</button></div>
+      <small>8 caracteres ou mais, com letras e números.</small></div>`, {
+    saveLabel: novo ? 'Cadastrar' : 'Salvar',
+    onSave: async (el) => {
+      const body = { nome: RP.$('#u-n', el).value, email: RP.$('#u-e', el).value, empresa: RP.$('#u-emp', el).value, telefone: RP.$('#u-t', el).value, senha: RP.$('#u-s', el).value };
+      if (novo) { body.perfil = RP.$('#u-p', el).value; await RP.api('/usuarios', { method: 'POST', body }); RP.toast(`Usuário criado. Senha inicial: ${body.senha}`); }
+      else { await RP.api('/usuarios/' + u.id, { method: 'PUT', body }); RP.toast(body.senha ? 'Dados e senha atualizados' : 'Dados atualizados'); }
+      carregar();
+    },
+  });
+  RP.$('#u-g', d.el).onclick = () => { RP.$('#u-s', d.el).value = gerarSenha(); };
+  if (novo) RP.$('#u-s', d.el).value = gerarSenha();
+}
+</script>
+</body>
+</html>

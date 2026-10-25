@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auditoria · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+<script src="/js/planilha.js"></script>
+<script src="/js/historico.js"></script>
+</head>
+<body>
+<script>
+// Auditoria: tudo o que mudou no sistema, com quem, quando, de onde e o antes/depois
+let S, linhas = [], mais = null, filtros = { de: '', ate: '', usuario: '', tabela: '', acao: '', q: '' }, meta = null;
+const ACAO = { insert: ['Criou', 'var(--ok)'], update: ['Alterou', 'var(--info)'], delete: ['Excluiu', 'var(--err)'], login: ['Entrou', 'var(--muted)'], login_falhou: ['Login recusado', 'var(--warn)'] };
+
+(async () => {
+  S = await Shell.init({ key: 'auditoria', title: 'Auditoria', sub: 'Histórico de tudo o que muda no sistema: quem, quando, de onde e o que era antes', perfis: ['admin'] });
+  S.actions.innerHTML = '<button class="btn sm" id="exp">Exportar (.xlsx)</button>';
+  RP.$('#exp').onclick = exportar;
+  meta = await RP.api('/auditoria/filtros');
+  const q = new URLSearchParams(location.search);
+  for (const k of Object.keys(filtros)) if (q.get(k)) filtros[k] = q.get(k);
+  if (q.get('registro')) filtros.registro = q.get('registro');
+  layout(); buscar();
+})();
+
+function layout() {
+  const r = meta.resumo;
+  S.content.innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><span>Registros no histórico</span><b>${RP.fmtN(r.total)}</b></div>
+      <div class="kpi"><span>Mudanças nas últimas 24 h</span><b>${RP.fmtN(r.hoje)}</b></div>
+      <div class="kpi"><span>Logins recusados (24 h)</span><b style="color:${r.falhas_hoje ? 'var(--warn)' : 'inherit'}">${RP.fmtN(r.falhas_hoje)}</b></div>
+    </div>
+    <div class="card"><div class="toolbar" style="padding:12px 16px;flex-wrap:wrap">
+      <div class="field" style="margin:0"><label for="f-de">De</label><input class="input" type="date" id="f-de" value="${filtros.de}"></div>
+      <div class="field" style="margin:0"><label for="f-ate">Até</label><input class="input" type="date" id="f-ate" value="${filtros.ate}"></div>
+      <div class="field" style="margin:0;min-width:200px"><label for="f-u">Quem</label><select class="input" id="f-u"><option value="">Todos</option><option value="sistema" ${filtros.usuario === 'sistema' ? 'selected' : ''}>O próprio sistema</option>${meta.usuarios.map((u) => `<option value="${u.id}" ${String(u.id) === filtros.usuario ? 'selected' : ''}>${RP.esc(u.nome || 'usuário ' + u.id)}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0;min-width:180px"><label for="f-t">Área</label><select class="input" id="f-t"><option value="">Todas</option>${meta.tabelas.map((t) => `<option value="${t}" ${t === filtros.tabela ? 'selected' : ''}>${RPH.area(t)}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0"><label for="f-a">Ação</label><select class="input" id="f-a"><option value="">Todas</option>${Object.entries(ACAO).map(([k, [t]]) => `<option value="${k}" ${k === filtros.acao ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0;flex:1;min-width:200px"><label for="f-q">Buscar</label><input class="input" id="f-q" type="search" placeholder="Nome, valor, código…" value="${RP.esc(filtros.q)}"></div>
+      ${filtros.registro ? `<span class="pill" style="align-self:flex-end">Registro ${RP.esc(filtros.registro)} <button class="btn sm" id="f-xr" style="padding:0 6px;min-height:0">×</button></span>` : ''}
+    </div>
+    <div id="lista"></div></div>`;
+  const ler = () => { filtros = { ...filtros, de: RP.$('#f-de').value, ate: RP.$('#f-ate').value, usuario: RP.$('#f-u').value, tabela: RP.$('#f-t').value, acao: RP.$('#f-a').value, q: RP.$('#f-q').value.trim() }; buscar(); };
+  ['f-de', 'f-ate', 'f-u', 'f-t', 'f-a'].forEach((id) => (RP.$('#' + id).onchange = ler));
+  const q$ = RP.$('#f-q'); q$.oninput = () => { clearTimeout(q$._t); q$._t = setTimeout(ler, 350); };
+  RP.$('#f-xr')?.addEventListener('click', () => { delete filtros.registro; layout(); buscar(); });
+}
+
+function params(antes) {
+  const p = new URLSearchParams();
+  if (filtros.de) p.set('de', filtros.de);
+  if (filtros.ate) p.set('ate', filtros.ate);
+  if (filtros.usuario === 'sistema') p.set('sistema', '1'); else if (filtros.usuario) p.set('usuario', filtros.usuario);
+  if (filtros.tabela) p.set('tabela', filtros.tabela);
+  if (filtros.acao) p.set('acao', filtros.acao);
+  if (filtros.q) p.set('q', filtros.q);
+  if (filtros.registro) p.set('registro', filtros.registro);
+  if (antes) p.set('antes', antes);
+  return p.toString();
+}
+async function buscar(continuar) {
+  const r = await RP.api('/auditoria?' + params(continuar ? mais : null));
+  linhas = continuar ? linhas.concat(r.linhas) : r.linhas; mais = r.mais;
+  desenhar();
+}
+
+function desenhar() {
+  const el = RP.$('#lista');
+  if (!linhas.length) { el.innerHTML = '<div class="empty">Nada encontrado com esses filtros.</div>'; return; }
+  let dia = '';
+  el.innerHTML = `<div class="scroll"><table class="tbl audtbl"><thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Onde</th><th>O que mudou</th></tr></thead><tbody>
+    ${linhas.map((l, i) => {
+      const d = new Date(l.criado_em), dd = d.toLocaleDateString('pt-BR');
+      const sep = dd !== dia ? `<tr class="pmgrp"><td colspan="5">${(dia = dd)}</td></tr>` : '';
+      const [at, cor] = ACAO[l.acao] || [l.acao, 'var(--muted)'];
+      return `${sep}<tr class="click" data-i="${i}" tabindex="0"><td style="white-space:nowrap">${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
+        <td><b>${RP.esc(l.usuario_nome || 'Sistema')}</b>${l.ip ? `<div class="muted" style="font-size:.78rem">${RP.esc(l.ip)}</div>` : ''}</td>
+        <td><span class="pill" style="color:${cor}"><i></i>${at}</span></td>
+        <td>${RPH.area(l.tabela)}<div class="muted" style="font-size:.8rem">${RP.esc(l.registro_nome || (l.registro_id ? '#' + l.registro_id : ''))}</div></td>
+        <td class="audres">${l.resumo ? RP.esc(l.resumo) : RPH.resumo(l)}</td></tr>`; }).join('')}
+  </tbody></table></div>
+  ${mais ? '<div style="padding:12px;text-align:center"><button class="btn" id="mais">Carregar mais</button></div>' : ''}`;
+  RP.$$('tr[data-i]', el).forEach((tr) => { tr.onclick = () => detalhe(linhas[+tr.dataset.i]); tr.onkeydown = (e) => { if (e.key === 'Enter') tr.onclick(); }; });
+  RP.$('#mais', el)?.addEventListener('click', (ev) => RP.busy(ev.currentTarget, () => buscar(true)));
+}
+
+function detalhe(l) {
+  const [at] = ACAO[l.acao] || [l.acao];
+  RP.drawer(`${at} · ${RPH.area(l.tabela)}`, `
+    <dl class="info" style="margin-top:0"><dt>Quando</dt><dd>${RP.fmtDataHora(l.criado_em)}</dd><dt>Quem</dt><dd>${RP.esc(l.usuario_nome || 'O próprio sistema')}${l.ip ? ' · IP ' + RP.esc(l.ip) : ''}</dd>
+      <dt>Registro</dt><dd>${RP.esc(l.registro_nome || '')} ${l.registro_id ? `<span class="muted">#${RP.esc(l.registro_id)}</span>` : ''}</dd>${l.resumo ? `<dt>Detalhe</dt><dd>${RP.esc(l.resumo)}</dd>` : ''}</dl>
+    ${RPH.tabela(l)}
+    ${l.tabela && l.registro_id ? `<p style="margin-top:14px"><a href="/app/auditoria.html?tabela=${l.tabela}&registro=${encodeURIComponent(l.registro_id)}">Ver todo o histórico deste registro</a></p>` : ''}`, { saveLabel: 'Fechar', onSave: async () => {} }).el.classList.add('wide');
+}
+
+function exportar() {
+  const rows = [['Data', 'Hora', 'Quem', 'IP', 'Ação', 'Área', 'Registro', 'O que mudou'], ...linhas.map((l) => { const d = new Date(l.criado_em);
+    return [d.toLocaleDateString('pt-BR'), d.toLocaleTimeString('pt-BR'), l.usuario_nome || 'Sistema', l.ip || '', (ACAO[l.acao] || [l.acao])[0], RPH.area(l.tabela), l.registro_nome || l.registro_id || '', l.resumo || RPH.resumoTexto(l)]; })];
+  Planilha.baixar(Planilha.xlsx([{ nome: 'Auditoria', linhas: rows, larguras: [12, 10, 24, 16, 14, 18, 34, 80] }]), `Auditoria_${new Date().toLocaleDateString('sv')}.xlsx`);
+}
+</script>
+</body>
+</html>

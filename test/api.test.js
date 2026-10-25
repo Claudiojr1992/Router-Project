@@ -1,0 +1,109 @@
+// Testes de API contra um banco PostgreSQL de teste (vazio). Rodam com: RUN_API_TESTS=1 DATABASE_URL=postgres://… npm run test:api
+// Sobem o servidor numa porta livre, migram o banco e conferem permissões, auditoria e limite de tentativas.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { spawn, execFileSync } = require('child_process');
+const path = require('path');
+
+const ATIVO = process.env.RUN_API_TESTS === '1';
+const RAIZ = path.join(__dirname, '..');
+const PORTA = 18000 + Math.floor(Math.random() * 1000);
+const BASE = `http://127.0.0.1:${PORTA}`;
+const ENV = { ...process.env, PORT: String(PORTA), NODE_ENV: 'test', SESSION_SECRET: 'segredo-de-teste-0123456789-abcdef', ADMIN_EMAIL: 'admin@teste.local',
+  ADMIN_PASSWORD: 'Senha1234', ADMIN_NAME: 'Admin Teste', SEED_BNB: 'false', GEOCODER: 'off', TILE_URL: 'off' };
+let srv;
+
+// cliente HTTP com cookie de sessão
+function cliente() {
+  let cookie = '';
+  const req = async (metodo, url, body) => {
+    const r = await fetch(BASE + url, { method: metodo, headers: { 'Content-Type': 'application/json', Origin: BASE, ...(cookie ? { Cookie: cookie } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const sc = r.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
+    const txt = await r.text(); let json = null; try { json = JSON.parse(txt); } catch (_) { /* não é JSON */ }
+    return { status: r.status, json };
+  };
+  return { get: (u) => req('GET', u), post: (u, b) => req('POST', u, b || {}), put: (u, b) => req('PUT', u, b || {}), patch: (u, b) => req('PATCH', u, b || {}), del: (u) => req('DELETE', u) };
+}
+
+test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco de teste' }, async (t) => {
+  execFileSync(process.execPath, ['scripts/bootstrap.js'], { cwd: RAIZ, env: ENV, stdio: 'pipe' });
+  srv = spawn(process.execPath, ['src/server.js'], { cwd: RAIZ, env: ENV, stdio: 'pipe' });
+  for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/api/health')).ok) break; } catch (_) { /* subindo */ } await new Promise((r) => setTimeout(r, 200)); }
+  t.after(() => srv.kill());
+
+  const admin = cliente();
+  const sufixo = Date.now().toString(36);
+
+  await t.test('login do administrador traz as permissões', async () => {
+    const r = await admin.post('/api/auth/login', { email: 'admin@teste.local', senha: 'Senha1234' });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.usuario.perfil, 'admin');
+    assert.equal(r.json.usuario.permissoes.clientes, 'editar');
+  });
+
+  let cli, ct, end;
+  await t.test('cadastro de cliente, contrato e endereço', async () => {
+    cli = (await admin.post('/api/clientes', { nome: 'Cliente ' + sufixo })).json;
+    assert.ok(cli.id);
+    const c = await admin.post(`/api/clientes/${cli.id}/contratos`, { numero: 'C-' + sufixo, tipo: 'principal' });
+    assert.equal(c.status, 200, JSON.stringify(c.json));
+    ct = c.json.id;
+    end = (await admin.post(`/api/contratos/${ct}/enderecos`, { nome: 'Agência Teste', municipio: 'Fortaleza', uf: 'CE', cameras: 4 })).json;
+    assert.ok(end.id);
+  });
+
+  await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
+    const r = await admin.put('/api/enderecos/' + end.id, { nome: 'Agência Teste', logradouro: 'Rua Nova, 10', municipio: 'Fortaleza', uf: 'CE', cameras: 6 });
+    assert.equal(r.status, 200);
+    const h = (await admin.get(`/api/enderecos/${end.id}/historico`)).json;
+    const up = h.find((x) => x.acao === 'update' && x.depois && x.depois.cameras === 6);
+    assert.ok(up, 'linha de alteração');
+    assert.equal(up.antes.cameras, 4);
+    assert.equal(up.usuario_nome, 'Admin Teste');
+    const a = (await admin.get('/api/auditoria?tabela=enderecos&registro=' + end.id)).json;
+    assert.ok(a.linhas.length >= 2);
+  });
+
+  const visitante = cliente();
+  await t.test('perfil novo só com leitura de clientes', async () => {
+    const p = await admin.post('/api/perfis', { codigo: 'visitante_' + sufixo, nome: 'Visitante ' + sufixo, permissoes: { clientes: 'ver' }, acoes: {} });
+    assert.equal(p.status, 200);
+    const u = await admin.post('/api/usuarios', { nome: 'Visitante', email: `v_${sufixo}@teste.local`, perfil: p.json.codigo, senha: 'Senha1234' });
+    assert.equal(u.status, 200);
+    assert.equal((await visitante.post('/api/auth/login', { email: `v_${sufixo}@teste.local`, senha: 'Senha1234' })).status, 200);
+    assert.equal((await visitante.get('/api/clientes')).status, 200);
+    assert.equal((await visitante.put('/api/enderecos/' + end.id, { nome: 'x', municipio: 'Fortaleza', uf: 'CE', cameras: 1 })).status, 403);
+    assert.equal((await visitante.get('/api/auditoria')).status, 403);
+    assert.equal((await visitante.get('/api/faturamento/contratos')).status, 403);
+    assert.equal((await visitante.get('/api/perfis')).status, 403);
+  });
+
+  await t.test('perfil do sistema não pode ser excluído; administrador mantém acesso total', async () => {
+    assert.equal((await admin.del('/api/perfis/coordenador')).status, 400);
+    await admin.put('/api/perfis/admin', { nome: 'Administrador', permissoes: {}, acoes: {} });
+    assert.equal((await admin.get('/api/auditoria')).status, 200);
+  });
+
+  await t.test('reabrir atividade concluída exige a permissão', async () => {
+    const at = await admin.post(`/api/contratos/${ct}/atividades`, { nome: 'Instalação', tempo_modo: 'fixo', tempo_qtd: 1, tempo_unidade: 'dia' });
+    assert.equal(at.status, 200, JSON.stringify(at.json));
+    const proj = (await admin.get('/api/projetos/' + ct)).json;
+    const tarefa = proj.enderecos.flatMap((e) => e.tarefas)[0];
+    assert.ok(tarefa, 'tarefa criada para o endereço');
+    assert.equal((await admin.patch('/api/tarefas/' + tarefa.id, { status: 'concluida' })).status, 200);
+    await admin.put('/api/perfis/visitante_' + sufixo, { nome: 'Visitante', permissoes: { clientes: 'ver', projetos: 'editar' }, acoes: { reabrir: false } });
+    const r = await visitante.patch('/api/tarefas/' + tarefa.id, { status: 'em_andamento' });
+    assert.equal(r.status, 403);
+    assert.match(r.json.erro, /reabrir/);
+    assert.equal((await admin.patch('/api/tarefas/' + tarefa.id, { status: 'em_andamento' })).status, 200);
+  });
+
+  await t.test('limite de tentativas de login fica no banco', async () => {
+    const anon = cliente();
+    let ultimo;
+    for (let i = 0; i < 11; i++) ultimo = await anon.post('/api/auth/login', { email: `ninguem_${sufixo}@teste.local`, senha: 'errada' });
+    assert.equal(ultimo.status, 429);
+    const a = (await admin.get('/api/auditoria?acao=login_falhou&limite=10')).json;
+    assert.ok(a.linhas.length > 0, 'tentativas recusadas na auditoria');
+  });
+});

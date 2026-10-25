@@ -1,0 +1,1 @@
+Arquivos servidos pela função api/index.js (ver vercel.json).

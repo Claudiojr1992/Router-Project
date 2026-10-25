@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Técnicos e times · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+</head>
+<body>
+<script>
+const TIPO = { tecnico: ['Técnico', 'tec'], coordenacao: ['Coordenação', 'coo'], administrativo: ['Administrativo', 'adm'] };
+const CORES = ['#2F6FD0', '#D9622B', '#22955F', '#B0399A', '#B88A0A', '#14909F', '#D23E5A', '#6F55C8'];
+let S, pessoas = [], times = [], aba = 'tecnico', gestor = false;
+const f = (id, label, v = '', extra = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${RP.esc(v ?? '')}" ${extra}></div>`;
+
+(async () => {
+  S = await Shell.init({ key: 'equipe', title: 'Técnicos e times', sub: 'Quem executa em campo, quem coordena e quem cuida do administrativo', perfis: Shell.ESC });
+  gestor = Shell.pode('equipe', 'editar');
+  carregar();
+})();
+
+async function carregar() { [pessoas, times] = await Promise.all([RP.api('/pessoas'), RP.api('/times')]); render(); }
+
+function render() {
+  const n = (t) => pessoas.filter((p) => p.tipo === t && p.ativo).length;
+  S.actions.innerHTML = gestor ? (aba === 'times' ? '<button class="btn sm primary" id="nt">+ Novo time</button>' : '<button class="btn sm primary" id="np">+ Nova pessoa</button>') : '';
+  RP.$('#nt')?.addEventListener('click', () => time(null));
+  RP.$('#np')?.addEventListener('click', () => pessoa(null));
+  S.content.innerHTML = `<div class="card">
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="${aba === 'tecnico'}" data-a="tecnico">Técnicos (${n('tecnico')})</button>
+      <button role="tab" aria-selected="${aba === 'escritorio'}" data-a="escritorio">Coordenação e administrativo (${n('coordenacao') + n('administrativo')})</button>
+      <button role="tab" aria-selected="${aba === 'times'}" data-a="times">Times (${times.length})</button>
+    </div><div id="tab"></div></div>
+    <p class="muted" style="font-size:.88rem;margin:0">Quem se cadastra pelo site e é aprovado em Usuários e acessos entra aqui automaticamente. Também dá para cadastrar pessoas sem login.</p>`;
+  RP.$$('[data-a]', S.content).forEach((b) => (b.onclick = () => { aba = b.dataset.a; render(); }));
+  const el = RP.$('#tab');
+  if (aba === 'times') return tabTimes(el);
+  const vis = pessoas.filter((p) => (aba === 'tecnico' ? p.tipo === 'tecnico' : p.tipo !== 'tecnico'));
+  el.innerHTML = vis.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Nome</th><th>Tipo</th><th>${aba === 'tecnico' ? 'Base' : 'Área'}</th><th>${aba === 'tecnico' ? 'Times' : 'E-mail'}</th><th>Abertas</th><th>Login</th></tr></thead>
+    <tbody>${vis.map((p) => `<tr class="${gestor ? 'click' : ''}" data-id="${p.id}" style="${p.ativo ? '' : 'opacity:.55'}">
+      <td><div class="row" style="flex-wrap:nowrap"><span class="avatar">${RP.esc(RP.iniciais(p.nome))}</span><div><b>${RP.esc(p.nome)}</b>${p.habilidades.length ? `<div class="muted" style="font-size:.8rem">${p.habilidades.map(RP.esc).join(', ')}</div>` : ''}</div></div></td>
+      <td><span class="pill ${TIPO[p.tipo][1]}"><i></i>${TIPO[p.tipo][0]}</span></td>
+      <td>${aba === 'tecnico' ? RP.esc([p.cidade_base, p.uf_base].filter(Boolean).join('/') || '—') : RP.esc(p.area || '—')}</td>
+      <td>${aba === 'tecnico' ? RP.esc((p.times || []).join(', ') || '—') : RP.esc(p.email || '—')}</td>
+      <td>${p.abertas}</td><td>${p.usuario_id ? 'Sim' : '<span class="muted">Sem login</span>'}</td></tr>`).join('')}</tbody></table></div>`
+    : '<div class="empty">Ninguém cadastrado aqui ainda.</div>';
+  if (gestor) RP.$$('tr.click', el).forEach((r) => (r.onclick = () => pessoa(pessoas.find((p) => p.id === +r.dataset.id))));
+}
+
+function pessoa(p) {
+  const x = p || { tipo: aba === 'tecnico' ? 'tecnico' : 'administrativo', habilidades: [], ativo: true };
+  RP.drawer(p ? 'Editar pessoa' : 'Nova pessoa', `
+    ${f('p-nome', 'Nome', x.nome, 'required')}
+    <div class="field"><label for="p-tipo">Tipo</label><select class="input" id="p-tipo">${Object.entries(TIPO).map(([k, v]) => `<option value="${k}" ${k === x.tipo ? 'selected' : ''}>${v[0]}</option>`).join('')}</select>
+      <small>Coordenação e administrativo também podem receber atividades delegadas (ex.: handover, documentação).</small></div>
+    ${f('p-area', 'Área', x.area, 'placeholder="Ex.: Documentação, Faturamento"')}
+    <div class="row"><div style="flex:2">${f('p-cid', 'Cidade base', x.cidade_base)}</div><div style="flex:1">${f('p-uf', 'UF', x.uf_base, 'maxlength="2"')}</div></div>
+    ${f('p-tel', 'Telefone', x.telefone, 'type="tel"')}
+    ${f('p-hab', 'Habilidades (separe por vírgula)', (x.habilidades || []).join(', '), 'placeholder="CFTV, Rede, Servidor"')}
+    <label class="check"><input type="checkbox" id="p-at" ${x.ativo ? 'checked' : ''}> Ativo</label>`, {
+    onSave: async (el) => {
+      const v = (id) => RP.$('#' + id, el).value;
+      const body = { nome: v('p-nome'), tipo: v('p-tipo'), area: v('p-area'), cidade_base: v('p-cid'), uf_base: v('p-uf'), telefone: v('p-tel'),
+        habilidades: v('p-hab').split(',').map((s) => s.trim()).filter(Boolean), ativo: RP.$('#p-at', el).checked };
+      if (p) await RP.api('/pessoas/' + p.id, { method: 'PUT', body }); else await RP.api('/pessoas', { method: 'POST', body });
+      RP.toast('Pessoa salva'); carregar();
+    },
+  });
+}
+
+function tabTimes(el) {
+  el.innerHTML = times.length ? `<div class="grid2" style="padding:16px">${times.map((t) => `<div class="card ccard" ${gestor ? `data-id="${t.id}" role="button" tabindex="0"` : ''} style="border-top:4px solid ${RP.esc(t.cor || 'var(--accent)')}">
+    <h3>${RP.esc(t.nome)}</h3><div class="muted" style="font-size:.9rem">${RP.esc(t.base || 'Base não informada')} · ${t.membros.length} técnico(s)</div>
+    <div class="chips">${t.membros.map((m) => `<span class="pill">${m.lider ? '★ ' : ''}${RP.esc(m.nome)}</span>`).join('') || '<span class="muted">Sem técnicos</span>'}</div></div>`).join('')}</div>`
+    : '<div class="empty">Nenhum time ainda. Monte os times com os técnicos que vão sair juntos.</div>';
+  RP.$$('[data-id]', el).forEach((b) => (b.onclick = () => time(times.find((t) => t.id === +b.dataset.id))));
+}
+
+function time(t) {
+  const x = t || { cor: CORES[times.length % CORES.length], membros: [] };
+  const sel = new Set(x.membros.map((m) => m.id));
+  const lider = x.membros.find((m) => m.lider)?.id;
+  const tecs = pessoas.filter((p) => p.tipo === 'tecnico' && (p.ativo || sel.has(p.id)));
+  const d = RP.drawer(t ? 'Editar time' : 'Novo time', `
+    ${f('t-nome', 'Nome do time', x.nome, 'required placeholder="Ex.: Time 1"')}
+    <div class="row"><div style="flex:2">${f('t-base', 'Base de saída', x.base, 'placeholder="Ex.: Fortaleza/CE"')}</div><div style="flex:1">${f('t-cor', 'Cor', x.cor, 'type="color" style="padding:4px"')}</div></div>
+    <div class="field"><label>Técnicos do time</label>
+      ${tecs.length ? tecs.map((p) => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><label class="check" style="margin:0;flex:1"><input type="checkbox" value="${p.id}" ${sel.has(p.id) ? 'checked' : ''}> ${RP.esc(p.nome)} <span class="muted">${RP.esc([p.cidade_base, p.uf_base].filter(Boolean).join('/'))}</span></label>
+        <label class="muted" style="font-size:.85rem"><input type="radio" name="lider" value="${p.id}" ${p.id === lider ? 'checked' : ''}> líder</label></div>`).join('') : '<p class="muted">Cadastre técnicos na aba Técnicos.</p>'}</div>
+    ${t ? '<button class="btn sm danger" type="button" id="t-del">Excluir time</button>' : ''}`, {
+    onSave: async (el) => {
+      const membros = RP.$$('input[type=checkbox]', el).filter((c) => c.checked).map((c) => +c.value);
+      const lid = RP.$('input[name=lider]:checked', el);
+      const body = { nome: RP.$('#t-nome', el).value, base: RP.$('#t-base', el).value, cor: RP.$('#t-cor', el).value, membros, lider: lid && membros.includes(+lid.value) ? +lid.value : null };
+      if (t) await RP.api('/times/' + t.id, { method: 'PUT', body }); else await RP.api('/times', { method: 'POST', body });
+      RP.toast('Time salvo'); carregar();
+    },
+  });
+  RP.$('#t-del', d.el)?.addEventListener('click', async () => {
+    if (!confirm('Excluir este time? Os técnicos continuam cadastrados.')) return;
+    await RP.api('/times/' + t.id, { method: 'DELETE' }); d.close(); RP.toast('Time excluído'); carregar();
+  });
+}
+</script>
+</body>
+</html>

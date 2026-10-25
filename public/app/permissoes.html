@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Permissões · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+</head>
+<body>
+<script>
+// Permissões: perfis editáveis com nível por módulo (nenhum / ver / editar) e ações especiais
+let S, dados = null, sel = null, aba = 'editar', rascunho = null, podeEditar = false;
+const NIVEIS = [['nenhum', 'Sem acesso'], ['ver', 'Ver'], ['editar', 'Ver e editar']];
+const TIPOS = [['', 'Não entra'], ['tecnico', 'Técnico'], ['coordenacao', 'Coordenação'], ['administrativo', 'Administrativo']];
+
+(async () => {
+  S = await Shell.init({ key: 'permissoes', title: 'Permissões', sub: 'Perfis de acesso: o que cada um pode ver, editar ou fazer', perfis: ['admin'] });
+  podeEditar = Shell.pode('permissoes', 'editar');
+  await carregar();
+})();
+
+async function carregar(manter) {
+  dados = await RP.api('/perfis');
+  if (!manter || !dados.perfis.some((p) => p.codigo === sel)) sel = (dados.perfis.find((p) => p.codigo === sel) || dados.perfis[0]).codigo;
+  rascunho = null;
+  render();
+}
+const perfilSel = () => dados.perfis.find((p) => p.codigo === sel);
+
+function render() {
+  S.actions.innerHTML = podeEditar ? '<button class="btn sm primary" id="novo">+ Novo perfil</button>' : '';
+  RP.$('#novo')?.addEventListener('click', () => novo());
+  S.content.innerHTML = `
+    <div class="vtabs" role="tablist" style="margin:0">${[['editar', 'Editar perfil'], ['comparar', 'Comparar perfis']].map(([k, t]) => `<button type="button" role="tab" class="eqc" data-aba="${k}" aria-pressed="${aba === k}">${t}</button>`).join('')}</div>
+    <div id="corpo"></div>`;
+  RP.$$('[data-aba]').forEach((b) => (b.onclick = () => { aba = b.dataset.aba; render(); }));
+  (aba === 'editar' ? editor : comparar)(RP.$('#corpo'));
+}
+
+function editor(el) {
+  const p = perfilSel();
+  const r = rascunho || (rascunho = { nome: p.nome, descricao: p.descricao || '', tipo_pessoa: p.tipo_pessoa || '', permissoes: { ...p.permissoes }, acoes: { ...p.acoes } });
+  const bloqueado = !podeEditar || p.codigo === 'admin';
+  const grupos = [...new Set(dados.modulos.map((m) => m.grupo))];
+  el.innerHTML = `<div class="pmgrid">
+    <aside class="card pmlista" aria-label="Perfis">${dados.perfis.map((x) => `<button type="button" class="pmitem${x.codigo === sel ? ' on' : ''}" data-p="${x.codigo}">
+        <span class="avatar sm">${RP.esc(RP.iniciais(x.nome))}</span><span class="pmtxt"><b>${RP.esc(x.nome)}</b><small>${x.usuarios} usuário(s)${x.sistema ? ' · do sistema' : ''}</small></span></button>`).join('')}</aside>
+    <section class="card">
+      <header><div><h2>${RP.esc(p.nome)}</h2><small class="muted">código <code>${RP.esc(p.codigo)}</code>${p.sistema ? ' · perfil do sistema (pode editar, não pode excluir)' : ''}</small></div>
+        <div class="row" style="gap:8px">${podeEditar ? `<button class="btn sm" id="dup">Duplicar</button>${!p.sistema ? '<button class="btn sm danger" id="del">Excluir</button>' : ''}` : ''}</div></header>
+      <div class="body">
+        ${p.codigo === 'admin' ? '<p class="pmaviso">O Administrador tem sempre acesso total, para ninguém perder o controle do sistema. Aqui só mudam nome e descrição.</p>' : ''}
+        <div class="row" style="gap:12px;flex-wrap:wrap">
+          <div class="field" style="flex:1;min-width:220px"><label for="pf-n">Nome</label><input class="input" id="pf-n" value="${RP.esc(r.nome)}" ${podeEditar ? '' : 'disabled'}></div>
+          <div class="field" style="flex:2;min-width:260px"><label for="pf-d">Descrição</label><input class="input" id="pf-d" value="${RP.esc(r.descricao)}" ${podeEditar ? '' : 'disabled'}></div>
+          <div class="field" style="flex:1;min-width:200px"><label for="pf-t">Em Técnicos e times entra como</label><select class="input" id="pf-t" ${bloqueado ? 'disabled' : ''}>${TIPOS.map(([k, t]) => `<option value="${k}" ${k === (r.tipo_pessoa || '') ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        </div>
+        <div class="row" style="justify-content:space-between;align-items:center;margin:6px 0 10px;flex-wrap:wrap;gap:8px"><h3 style="font-size:1.15rem">Telas e o que pode fazer em cada uma</h3>
+          ${bloqueado ? '' : `<div class="row" style="gap:6px"><span class="muted" style="font-size:.85rem">Todos:</span>${NIVEIS.map(([k, t]) => `<button type="button" class="btn sm" data-todos="${k}">${t}</button>`).join('')}</div>`}</div>
+        <div class="scroll" style="border:1px solid var(--line);border-radius:10px"><table class="tbl pmtbl"><thead><tr><th>Tela</th>${NIVEIS.map(([, t]) => `<th style="text-align:center">${t}</th>`).join('')}</tr></thead><tbody>
+          ${grupos.map((g) => `<tr class="pmgrp"><td colspan="4">${g}</td></tr>` + dados.modulos.filter((m) => m.grupo === g).map((m) => {
+            const v = p.codigo === 'admin' ? (m.soVer ? 'ver' : 'editar') : (r.permissoes[m.id] || 'nenhum');
+            return `<tr><td><b>${RP.esc(m.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(m.desc)}</div></td>${NIVEIS.map(([k]) => {
+              const indisp = m.soVer && k === 'editar';
+              return `<td style="text-align:center">${indisp ? '<span class="muted" title="Só leitura">—</span>' : `<label class="pmradio"><input type="radio" name="m-${m.id}" value="${k}" data-mod="${m.id}" ${v === k ? 'checked' : ''} ${bloqueado ? 'disabled' : ''} aria-label="${RP.esc(m.nome)}: ${k}"><span></span></label>`}</td>`; }).join('')}</tr>`; }).join('')).join('')}
+        </tbody></table></div>
+        <h3 style="font-size:1.15rem;margin:18px 0 8px">Ações especiais</h3>
+        <div class="pmacoes">${dados.acoes.map((a) => `<label class="pmacao"><span class="rtog"><input type="checkbox" data-acao="${a.id}" ${p.codigo === 'admin' || r.acoes[a.id] ? 'checked' : ''} ${bloqueado ? 'disabled' : ''}><span></span></span>${RP.esc(a.nome)}</label>`).join('')}</div>
+        ${podeEditar ? `<div class="row" style="gap:8px;margin-top:18px"><button class="btn primary" id="salvar">Salvar perfil</button><button class="btn" id="desfazer">Desfazer alterações</button><span class="muted" style="font-size:.85rem" id="pf-msg"></span></div>` : ''}
+      </div></section></div>`;
+  RP.$$('[data-p]', el).forEach((b) => (b.onclick = () => { if (rascunho && mudou() && !confirm('Descartar as alterações deste perfil?')) return; sel = b.dataset.p; rascunho = null; render(); }));
+  RP.$$('[data-mod]', el).forEach((i) => (i.onchange = () => { r.permissoes[i.dataset.mod] = i.value; aviso(); }));
+  RP.$$('[data-acao]', el).forEach((i) => (i.onchange = () => { r.acoes[i.dataset.acao] = i.checked; aviso(); }));
+  RP.$$('[data-todos]', el).forEach((b) => (b.onclick = () => { for (const m of dados.modulos) r.permissoes[m.id] = m.soVer && b.dataset.todos === 'editar' ? 'ver' : b.dataset.todos; editor(el); aviso(); }));
+  ['pf-n', 'pf-d', 'pf-t'].forEach((id) => RP.$('#' + id, el)?.addEventListener('input', () => { r.nome = RP.$('#pf-n').value; r.descricao = RP.$('#pf-d').value; r.tipo_pessoa = RP.$('#pf-t').value; aviso(); }));
+  RP.$('#salvar', el)?.addEventListener('click', (ev) => RP.busy(ev.currentTarget, salvar));
+  RP.$('#desfazer', el)?.addEventListener('click', () => { rascunho = null; editor(el); });
+  RP.$('#dup', el)?.addEventListener('click', () => novo(p));
+  RP.$('#del', el)?.addEventListener('click', async () => { if (!confirm(`Excluir o perfil ${p.nome}?`)) return; try { await RP.api('/perfis/' + p.codigo, { method: 'DELETE' }); RP.toast('Perfil excluído'); sel = null; carregar(); } catch (e) { RP.toast(e.message); } });
+}
+function mudou() { const p = perfilSel(), r = rascunho; return r && (r.nome !== p.nome || (r.descricao || '') !== (p.descricao || '') || (r.tipo_pessoa || '') !== (p.tipo_pessoa || '') || JSON.stringify(r.permissoes) !== JSON.stringify(p.permissoes) || JSON.stringify(r.acoes) !== JSON.stringify(p.acoes)); }
+function aviso() { const m = RP.$('#pf-msg'); if (m) m.textContent = mudou() ? 'Alterações não salvas' : ''; }
+async function salvar() {
+  try {
+    await RP.api('/perfis/' + sel, { method: 'PUT', body: rascunho });
+    RP.toast('Perfil salvo. Vale a partir da próxima ação de quem usa este perfil.');
+    await carregar(true);
+  } catch (e) { RP.toast(e.message); }
+}
+
+function novo(base) {
+  const b = base || perfilSel();
+  RP.drawer(base ? `Duplicar ${b.nome}` : 'Novo perfil', `
+    <div class="field"><label for="np-n">Nome</label><input class="input" id="np-n" required value="${base ? RP.esc(b.nome + ' (cópia)') : ''}" placeholder="Ex.: Gerente de contrato"></div>
+    <div class="field"><label for="np-c">Código</label><input class="input" id="np-c" placeholder="gerente_contrato" pattern="[a-z][a-z0-9_]{1,31}"><small>Letras minúsculas, números e _. Não muda depois.</small></div>
+    <div class="field"><label for="np-d">Descrição</label><input class="input" id="np-d" value="${RP.esc(b.descricao || '')}"></div>
+    <div class="field"><label for="np-b">Começar com as permissões de</label><select class="input" id="np-b">${dados.perfis.map((x) => `<option value="${x.codigo}" ${x.codigo === b.codigo ? 'selected' : ''}>${RP.esc(x.nome)}</option>`).join('')}</select></div>`, {
+    saveLabel: 'Criar perfil',
+    onSave: async (el) => {
+      const ref = dados.perfis.find((x) => x.codigo === RP.$('#np-b', el).value);
+      const nome = RP.$('#np-n', el).value.trim();
+      const codigo = RP.$('#np-c', el).value.trim() || nome;
+      const r = await RP.api('/perfis', { method: 'POST', body: { codigo, nome, descricao: RP.$('#np-d', el).value, tipo_pessoa: ref.tipo_pessoa, permissoes: ref.codigo === 'admin' ? Object.fromEntries(dados.modulos.map((m) => [m.id, m.soVer ? 'ver' : 'editar'])) : ref.permissoes, acoes: ref.codigo === 'admin' ? Object.fromEntries(dados.acoes.map((a) => [a.id, true])) : ref.acoes } });
+      RP.toast('Perfil criado'); sel = r.codigo; aba = 'editar'; await carregar(true);
+    },
+  });
+  const n = RP.$('#np-n'), c = RP.$('#np-c');
+  n.addEventListener('input', () => { if (!c.dataset.mexeu) c.value = n.value.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32); });
+  c.addEventListener('input', () => { c.dataset.mexeu = '1'; });
+  n.dispatchEvent(new Event('input'));
+}
+
+function comparar(el) {
+  const ICO = { nenhum: '<span class="pmn" title="Sem acesso">—</span>', ver: '<span class="pmv" title="Ver">Ver</span>', editar: '<span class="pme" title="Ver e editar">Editar</span>' };
+  const val = (p, m) => (p.codigo === 'admin' ? (m.soVer ? 'ver' : 'editar') : p.permissoes[m.id] || 'nenhum');
+  el.innerHTML = `<div class="card"><div class="scroll"><table class="tbl pmcmp"><thead><tr><th>Tela / ação</th>${dados.perfis.map((p) => `<th style="text-align:center">${RP.esc(p.nome)}<div class="muted" style="font-size:.75rem;font-weight:500;text-transform:none;letter-spacing:0">${p.usuarios} usuário(s)</div></th>`).join('')}</tr></thead><tbody>
+    ${dados.modulos.map((m) => `<tr><td>${RP.esc(m.nome)}</td>${dados.perfis.map((p) => `<td style="text-align:center">${ICO[val(p, m)]}</td>`).join('')}</tr>`).join('')}
+    <tr class="pmgrp"><td colspan="${dados.perfis.length + 1}">Ações especiais</td></tr>
+    ${dados.acoes.map((a) => `<tr><td>${RP.esc(a.nome)}</td>${dados.perfis.map((p) => `<td style="text-align:center">${p.codigo === 'admin' || p.acoes[a.id] ? '<span class="pme">Sim</span>' : '<span class="pmn">—</span>'}</td>`).join('')}</tr>`).join('')}
+  </tbody></table></div></div>`;
+}
+</script>
+</body>
+</html>

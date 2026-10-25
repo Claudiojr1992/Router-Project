@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Empresas · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+</head>
+<body>
+<script>
+let S, lista = [];
+const f = (id, label, val = '', extra = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${RP.esc(val ?? '')}" ${extra}></div>`;
+
+(async () => {
+  S = await Shell.init({ key: 'empresas', title: 'Empresas', sub: 'Empresas executoras e parceiras vinculadas aos contratos', perfis: Shell.ESC });
+  S.actions.innerHTML = '<button class="btn sm primary" id="nova">+ Nova empresa</button>';
+  RP.$('#nova').onclick = () => editar(null);
+  carregar();
+})();
+
+async function carregar() {
+  lista = await RP.api('/empresas');
+  S.content.innerHTML = lista.length ? `<div class="card"><div class="scroll"><table class="tbl"><thead><tr><th>Empresa</th><th>CNPJ</th><th>Contato</th><th>Contratos</th><th>Situação</th></tr></thead><tbody>
+    ${lista.map((e) => `<tr class="click" data-id="${e.id}" tabindex="0"><td><b>${RP.esc(e.nome)}</b></td><td>${RP.esc(e.cnpj || '—')}</td>
+      <td>${RP.esc([e.contato, e.email, e.telefone].filter(Boolean).join(' · ') || '—')}</td><td>${e.contratos}</td><td>${e.ativo ? 'Ativa' : '<span class="muted">Inativa</span>'}</td></tr>`).join('')}</tbody></table></div></div>`
+    : '<div class="card empty"><p style="margin:0 0 6px"><b>Nenhuma empresa ainda.</b></p><p style="margin:0">Cadastre a empresa que executa cada contrato. Ela aparece no cabeçalho dos relatórios e no faturamento.</p></div>';
+  RP.$$('tr.click', S.content).forEach((r) => { r.onclick = () => editar(lista.find((e) => e.id === +r.dataset.id)); r.onkeydown = (ev) => { if (ev.key === 'Enter') r.onclick(); }; });
+}
+
+function editar(e) {
+  const x = e || {};
+  RP.drawer(e ? 'Editar empresa' : 'Nova empresa', `
+    ${f('em-n', 'Nome', x.nome, 'required')}
+    <div class="row"><div style="flex:1">${f('em-c', 'CNPJ', x.cnpj)}</div><div style="flex:1">${f('em-t', 'Telefone', x.telefone, 'inputmode="tel"')}</div></div>
+    ${f('em-p', 'Contato (nome)', x.contato)}${f('em-e', 'E-mail', x.email, 'type="email"')}
+    ${e ? `<label class="check"><input type="checkbox" id="em-a" ${x.ativo ? 'checked' : ''}> Empresa ativa (aparece para escolher nos contratos)</label>` : ''}`, {
+    onSave: async (el) => {
+      const body = { nome: RP.$('#em-n', el).value, cnpj: RP.$('#em-c', el).value, telefone: RP.$('#em-t', el).value, contato: RP.$('#em-p', el).value, email: RP.$('#em-e', el).value,
+        ativo: e ? RP.$('#em-a', el).checked : true };
+      if (e) await RP.api('/empresas/' + e.id, { method: 'PUT', body }); else await RP.api('/empresas', { method: 'POST', body });
+      RP.toast('Empresa salva'); carregar();
+    },
+  });
+}
+</script>
+</body>
+</html>

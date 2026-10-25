@@ -1,0 +1,31 @@
+name: routproject
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: routproject
+      POSTGRES_USER: routproject
+      POSTGRES_PASSWORD: routproject
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U routproject"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://routproject:routproject@db:5432/routproject
+      DB_SSL: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

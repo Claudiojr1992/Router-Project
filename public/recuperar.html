@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recuperar acesso · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="auth">
+  <aside class="auth-brand" id="brand"></aside>
+  <main class="auth-main">
+    <form class="auth-card" id="f" novalidate>
+      <span class="mobile-logo"></span>
+      <h1>Recuperar acesso</h1>
+      <p class="lead">Informe o e-mail cadastrado. Enviaremos um código para você criar uma nova senha.</p>
+      <div class="alert" id="msg" hidden></div>
+      <div class="field"><label for="email">E-mail</label><input class="input" id="email" type="email" autocomplete="email" required></div>
+      <button class="btn primary block" id="go">Enviar código</button>
+      <p class="alt"><a href="/">Voltar para o login</a></p>
+    </form>
+  </main>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+RP.$('#f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  RP.busy(RP.$('#go'), async () => {
+    const email = RP.$('#email').value.trim();
+    try {
+      await RP.api('/auth/esqueci', { method: 'POST', body: { email } });
+      location.href = '/redefinir.html?email=' + encodeURIComponent(email);
+    } catch (err) { RP.showAlert(RP.$('#msg'), 'err', err.message); }
+  });
+});
+</script>
+</body>
+</html>

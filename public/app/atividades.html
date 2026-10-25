@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atividades · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+</head>
+<body>
+<script>
+const IMPACTO = { soma: 'Soma no tempo', paralelo: 'Em paralelo (não soma)', nenhum: 'Sem impacto no prazo' };
+let S, clientes = [], checklists = [], cli = null, contratoSel = null, ativs = [];
+const f = (id, label, v = '', extra = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${RP.esc(v ?? '')}" ${extra}></div>`;
+
+function tempoTxt(a) {
+  if (a.tempo_modo === 'por_camera') return `${a.min_por_camera} min por câmera`;
+  if (a.tempo_modo === 'faixa') return (a.faixas || []).map((x) => (x.ate ? `até ${x.ate} câm.: ${x.dias} d` : `acima: ${x.dias} d`)).join(' · ');
+  return `${String(a.tempo_qtd).replace('.', ',')} ${a.tempo_unidade === 'hora' ? 'h' : (a.tempo_qtd == 1 ? 'dia' : 'dias')}`;
+}
+
+(async () => {
+  S = await Shell.init({ key: 'atividades', title: 'Atividades', sub: 'Escolha o cliente e cadastre as atividades de cada contrato', perfis: Shell.ESC });
+  [clientes, checklists] = await Promise.all([RP.api('/clientes'), RP.api('/checklists')]);
+  if (!clientes.length) { S.content.innerHTML = '<div class="card empty">Cadastre um cliente primeiro.</div>'; return; }
+  await escolher(clientes[0].id);
+})();
+
+async function escolher(id) {
+  cli = await RP.api('/clientes/' + id);
+  contratoSel = cli.contratos[0]?.id || null;
+  await carregar();
+}
+
+async function carregar() {
+  ativs = contratoSel ? await RP.api(`/contratos/${contratoSel}/atividades`) : [];
+  render();
+}
+
+function render() {
+  const gestor = Shell.pode('atividades', 'editar');
+  S.content.innerHTML = `
+    <div class="row" style="gap:8px">${clientes.map((c) => `<button class="btn sm ${c.id === cli.id ? 'primary' : ''}" data-c="${c.id}">${RP.esc(c.nome)}</button>`).join('')}</div>
+    <div class="card">
+      <header class="toolbar">
+        <select class="input" id="ct" aria-label="Contrato" ${cli.contratos.length ? '' : 'hidden'}>${cli.contratos.map((c) => `<option value="${c.id}" ${c.id === contratoSel ? 'selected' : ''}>${RP.esc(c.numero)} · ${c.enderecos} endereços</option>`).join('')}</select>
+        <span class="spacer"></span>${gestor && contratoSel ? '<button class="btn sm primary" id="na">+ Nova atividade</button>' : ''}
+      </header>
+      ${!contratoSel ? `<div class="empty"><p style="margin:0 0 12px">Este cliente ainda não tem contrato. Crie o contrato e os endereços em Clientes.</p><a class="btn primary" href="/app/clientes.html?id=${cli.id}&aba=enderecos">Ir para o cliente e criar o contrato</a></div>` : ativs.length ? `<div class="scroll"><table class="tbl">
+        <thead><tr><th>#</th><th>Atividade</th><th>Fase</th><th>Quem executa</th><th>Tempo de execução</th><th>Impacto no tempo</th><th>Depende de</th><th>Checklist</th><th>Andamento</th></tr></thead>
+        <tbody>${ativs.map((a) => `<tr class="${gestor ? 'click' : ''}" data-id="${a.id}"><td>${a.ordem}</td><td><b>${RP.esc(a.nome)}</b>${a.evidencia ? `<div class="muted" style="font-size:.82rem">Evidência: ${RP.esc(a.evidencia)}</div>` : ''}</td>
+          <td>${RP.esc(a.etapa || '—')}</td><td>${RP.esc(a.funcao || '—')}</td><td>${RP.esc(tempoTxt(a))}</td><td>${IMPACTO[a.tempo_impacto || (a.conta_rota ? 'soma' : 'nenhum')]}</td><td>${a.predecessora_nome ? '🔒 ' + RP.esc(a.predecessora_nome) : '—'}</td><td>${RP.esc(a.checklist_nome || '—')}</td>
+          <td><div class="row" style="gap:6px;flex-wrap:nowrap"><div class="bar" style="width:80px"><i style="width:${a.tarefas ? Math.round(a.concluidas / a.tarefas * 100) : 0}%"></i></div><span class="muted" style="font-size:.82rem">${a.concluidas}/${a.tarefas}</span></div></td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty"><p style="margin:0 0 12px">Nenhuma atividade neste contrato ainda.</p>${gestor ? '<button class="btn primary" id="padrao">Usar as atividades padrão</button> <span class="muted" style="margin:0 8px">ou</span> use “+ Nova atividade”.' : ''}</div>`}
+    </div>
+    <p class="muted" style="font-size:.88rem;margin:0"><b>Impacto no tempo</b>: “Soma” entra nos dias de cada endereço; “Em paralelo” acontece junto (conta só se for maior que a soma); “Sem impacto” não muda o prazo. Ligue “Dias: pelas atividades” no Painel de rotas para usar esse cálculo. <b>Depende de</b>: a atividade só pode ser concluída depois que a predecessora estiver concluída no mesmo endereço. Cada atividade nova vira uma tarefa em todos os endereços do contrato.</p>`;
+  RP.$$('[data-c]', S.content).forEach((b) => (b.onclick = () => escolher(+b.dataset.c)));
+  RP.$('#ct')?.addEventListener('change', (e) => { contratoSel = +e.target.value; carregar(); });
+  RP.$('#padrao')?.addEventListener('click', (e) => RP.busy(e.target, async () => {
+    try { await RP.api(`/contratos/${contratoSel}/atividades/padrao`, { method: 'POST' }); RP.toast('Atividades padrão incluídas'); await carregar(); } catch (er) { RP.toast(er.message); }
+  }));
+  RP.$('#na')?.addEventListener('click', () => editar(null));
+  if (gestor) RP.$$('tr.click', S.content).forEach((r) => (r.onclick = () => editar(ativs.find((a) => a.id === +r.dataset.id))));
+}
+
+function editar(a) {
+  const x = a || { tempo_modo: 'fixo', tempo_qtd: 1, tempo_unidade: 'dia', conta_rota: true, ordem: ativs.length + 1, faixas: [{ ate: 22, dias: 2 }, { ate: 32, dias: 3 }, { ate: null, dias: 4 }] };
+  const faixas = x.faixas || [{ ate: 22, dias: 2 }, { ate: 32, dias: 3 }, { ate: null, dias: 4 }];
+  const d = RP.drawer(a ? 'Editar atividade' : 'Nova atividade', `
+    ${f('a-nome', 'Nome da atividade', x.nome, 'required placeholder="Ex.: Instalação de equipamentos"')}
+    <div class="row"><div style="flex:1">${f('a-curto', 'Nome curto', x.curto, 'placeholder="Ex.: Instalação"')}</div><div style="flex:1">${f('a-ordem', 'Ordem', x.ordem, 'type="number" min="0"')}</div></div>
+    <div class="row"><div style="flex:1">${f('a-etapa', 'Fase da atividade', x.etapa, 'placeholder="Ex.: Campo, Configuração, Entrega"')}</div><div style="flex:1">${f('a-func', 'Quem executa', x.funcao, 'placeholder="Ex.: Técnico de campo"')}</div></div>
+    <div class="field"><label for="a-modo">Tempo para execução</label><select class="input" id="a-modo">
+      <option value="fixo" ${x.tempo_modo === 'fixo' ? 'selected' : ''}>Tempo fixo por endereço</option>
+      <option value="por_camera" ${x.tempo_modo === 'por_camera' ? 'selected' : ''}>Minutos por câmera</option>
+      <option value="faixa" ${x.tempo_modo === 'faixa' ? 'selected' : ''}>Por faixa de câmeras</option></select></div>
+    <div id="m-fixo" class="row"><div style="flex:1">${f('a-qtd', 'Quantidade', x.tempo_qtd, 'inputmode="decimal"')}</div>
+      <div class="field" style="flex:1"><label for="a-un">Unidade</label><select class="input" id="a-un"><option value="hora" ${x.tempo_unidade === 'hora' ? 'selected' : ''}>horas</option><option value="dia" ${x.tempo_unidade !== 'hora' ? 'selected' : ''}>dias</option></select></div></div>
+    <div id="m-cam">${f('a-mpc', 'Minutos por câmera', x.min_por_camera || 45, 'type="number" min="1"')}</div>
+    <div id="m-faixa"><div class="field"><label>Faixas (dias de trabalho)</label>${faixas.map((fx, i) => `<div class="row" style="margin-bottom:6px">
+      <span class="muted" style="width:70px">${fx.ate === null ? 'Acima' : 'Até'}</span>${fx.ate === null ? '<span style="flex:1"></span>' : `<input class="input" style="flex:1" data-fa="${i}" value="${fx.ate}" type="number" min="1" aria-label="Até quantas câmeras">`}
+      <input class="input" style="flex:1" data-fd="${i}" value="${fx.dias}" inputmode="decimal" aria-label="Dias"><span class="muted">dias</span></div>`).join('')}</div></div>
+    <div class="field"><label for="a-imp">Impacto no tempo do endereço</label><select class="input" id="a-imp">
+      ${Object.entries(IMPACTO).map(([k, v]) => `<option value="${k}" ${k === (x.tempo_impacto || (x.conta_rota === false ? 'nenhum' : 'soma')) ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <small>Soma: aumenta os dias no endereço. Em paralelo: feita ao mesmo tempo que as outras (não soma). Sem impacto: não muda o prazo da rota.</small></div>
+    <div class="field"><label for="a-pre">Predecessora (depende de)</label><select class="input" id="a-pre"><option value="">Nenhuma</option>
+      ${ativs.filter((o) => !a || o.id !== a.id).map((o) => `<option value="${o.id}" ${o.id === x.predecessora_id ? 'selected' : ''}>${RP.esc(o.nome)}</option>`).join('')}</select>
+      <small>Esta atividade só pode ser concluída depois que a predecessora estiver concluída no mesmo endereço.</small></div>
+    <div class="field"><label for="a-ck">Checklist</label><select class="input" id="a-ck"><option value="">Sem checklist</option>${checklists.map((c) => `<option value="${c.id}" ${c.id === x.checklist_id ? 'selected' : ''}>${RP.esc(c.nome)} (${c.itens.length} itens)</option>`).join('')}</select></div>
+    ${f('a-ev', 'Evidência exigida', x.evidencia, 'placeholder="Ex.: Fotos de cada câmera instalada"')}
+    ${a ? '<button class="btn sm danger" type="button" id="a-del">Remover atividade</button>' : ''}`, {
+    onSave: async (el) => {
+      const v = (id) => RP.$('#' + id, el).value;
+      const body = { nome: v('a-nome'), curto: v('a-curto'), ordem: v('a-ordem') || 0, etapa: v('a-etapa'), funcao: v('a-func'), tempo_modo: v('a-modo'),
+        tempo_qtd: (v('a-qtd') || '0').replace(',', '.'), tempo_unidade: v('a-un'), min_por_camera: v('a-mpc'), tempo_impacto: v('a-imp'), conta_rota: v('a-imp') !== 'nenhum', predecessora_id: v('a-pre') || null,
+        checklist_id: v('a-ck') || null, evidencia: v('a-ev'),
+        faixas: faixas.map((fx, i) => ({ ate: fx.ate === null ? null : RP.$(`[data-fa="${i}"]`, el).value, dias: RP.$(`[data-fd="${i}"]`, el).value.replace(',', '.') })) };
+      if (a) await RP.api('/atividades/' + a.id, { method: 'PUT', body }); else await RP.api(`/contratos/${contratoSel}/atividades`, { method: 'POST', body });
+      RP.toast('Atividade salva'); carregar();
+    },
+  });
+  const modo = () => { const m = RP.$('#a-modo', d.el).value; RP.$('#m-fixo', d.el).hidden = m !== 'fixo'; RP.$('#m-cam', d.el).hidden = m !== 'por_camera'; RP.$('#m-faixa', d.el).hidden = m !== 'faixa'; };
+  RP.$('#a-modo', d.el).onchange = modo; modo();
+  RP.$('#a-del', d.el)?.addEventListener('click', async () => {
+    if (!confirm('Remover esta atividade? As tarefas dela deixam de aparecer nos projetos.')) return;
+    await RP.api('/atividades/' + a.id, { method: 'DELETE' }); d.close(); RP.toast('Atividade removida'); carregar();
+  });
+}
+</script>
+</body>
+</html>

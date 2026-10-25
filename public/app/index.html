@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<script src="/js/api.js"></script>
+</head>
+<body>
+<script>
+RP.api('/auth/me')
+  .then((r) => location.replace(r.usuario.perfil !== 'admin' && (!r.usuario.permissoes || !r.usuario.permissoes.rota || r.usuario.permissoes.rota === 'nenhum') ? '/app/minhas.html' : '/app/rota.html'))
+  .catch(() => location.replace('/'));
+</script>
+</body>
+</html>

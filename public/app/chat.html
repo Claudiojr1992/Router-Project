@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+</head>
+<body>
+<script>
+// Chat da operação: canal geral + um por projeto. Pedidos e ocorrências ficam abertos até alguém marcar como resolvido.
+let S, canais = [], atual = null, msgs = [], ultimoId = 0, tPoll = null, tCanais = null, ends = [], soAbertos = false;
+const TIPO = { mensagem: ['Mensagem', ''], pedido: ['Pedido', 'tp-pedido'], ocorrencia: ['Ocorrência', 'tp-ocor'] };
+const hora = (d) => new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const diaTxt = (d) => { const x = new Date(d), h = new Date(); const ontem = new Date(h); ontem.setDate(h.getDate() - 1);
+  return x.toDateString() === h.toDateString() ? 'Hoje' : x.toDateString() === ontem.toDateString() ? 'Ontem' : x.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' }); };
+
+(async () => {
+  S = await Shell.init({ key: 'chat', title: 'Chat', sub: 'Conversas da operação por projeto: avisos, pedidos de material e ocorrências de campo' });
+  S.content.classList.add('chat-page');
+  S.content.innerHTML = `<div class="chat">
+    <aside class="ch-list" aria-label="Canais"><div class="ch-busca"><input class="input" id="ch-q" placeholder="Buscar canal" aria-label="Buscar canal"></div><nav id="ch-canais"></nav></aside>
+    <section class="ch-main" aria-live="polite"><div class="ch-empty card empty">Escolha um canal.</div></section></div>`;
+  RP.$('#ch-q').oninput = desenharCanais;
+  await carregarCanais();
+  const q = new URLSearchParams(location.search).get('c');
+  abrir(canais.find((c) => c.url === q) ? q : 'geral');
+  tCanais = setInterval(carregarCanais, 15000);
+})();
+
+async function carregarCanais() { try { canais = await RP.api('/chat/canais'); desenharCanais(); } catch (_) { /* tenta de novo depois */ } }
+function desenharCanais() {
+  const q = (RP.$('#ch-q').value || '').toLowerCase();
+  RP.$('#ch-canais').innerHTML = canais.filter((c) => !q || c.nome.toLowerCase().includes(q)).map((c) => `<button type="button" class="ch-item${atual && atual.url === c.url ? ' on' : ''}" data-c="${c.url}">
+      <span class="ch-ic ${c.tipo}">${c.tipo === 'geral' ? '#' : RP.esc(RP.iniciais(c.nome))}</span>
+      <span class="ch-txt"><b>${RP.esc(c.nome)}</b><small>${c.ultima ? RP.esc((c.ultima.usuario ? c.ultima.usuario.split(' ')[0] + ': ' : '') + c.ultima.texto).slice(0, 60) : 'Sem mensagens'}</small></span>
+      <span class="ch-meta">${c.ultima ? `<small>${hora(c.ultima.criado_em)}</small>` : ''}${c.nao_lidas && (!atual || atual.url !== c.url) ? `<i class="ch-badge">${c.nao_lidas}</i>` : ''}${c.abertos ? `<i class="ch-ab" title="${c.abertos} pedido(s)/ocorrência(s) em aberto">${c.abertos}</i>` : ''}</span></button>`).join('');
+  RP.$$('[data-c]', RP.$('#ch-canais')).forEach((b) => (b.onclick = () => abrir(b.dataset.c)));
+}
+
+async function abrir(url) {
+  atual = canais.find((c) => c.url === url); if (!atual) return;
+  history.replaceState(null, '', '/app/chat.html?c=' + url);
+  msgs = []; ultimoId = 0; soAbertos = false;
+  RP.$('.chat').classList.add('aberto');
+  const main = RP.$('.ch-main');
+  main.innerHTML = `<header class="ch-head"><button class="btn sm ch-voltar" type="button" aria-label="Voltar aos canais">‹</button><div><h2>${atual.tipo === 'geral' ? '# ' : ''}${RP.esc(atual.nome)}</h2><small class="muted">${atual.tipo === 'geral' ? 'Avisos para toda a operação' : 'Projeto · equipe de campo e escritório'}</small></div>
+      <span class="spacer"></span><label class="check" style="margin:0"><input type="checkbox" id="ch-ab"> Só pedidos e ocorrências em aberto</label></header>
+    <div class="ch-msgs" id="ch-msgs"><p class="muted" style="text-align:center">Carregando…</p></div>
+    <form class="ch-form" id="ch-form" autocomplete="off">
+      <div class="row" style="gap:6px"><select class="input" id="ch-tipo" aria-label="Tipo"><option value="mensagem">Mensagem</option><option value="pedido">Pedido</option><option value="ocorrencia">Ocorrência</option></select>
+        ${atual.tipo === 'projeto' ? '<input class="input" id="ch-end" list="ch-ends" placeholder="Endereço (opcional)" aria-label="Endereço citado" style="flex:1;min-width:160px"><datalist id="ch-ends"></datalist>' : ''}</div>
+      <div class="row" style="gap:6px;flex-wrap:nowrap"><textarea class="input" id="ch-txt" rows="1" placeholder="Escreva uma mensagem. Enter envia, Shift+Enter quebra a linha." aria-label="Mensagem"></textarea><button class="btn primary" type="submit">Enviar</button></div></form>`;
+  RP.$('.ch-voltar').onclick = () => RP.$('.chat').classList.remove('aberto');
+  RP.$('#ch-ab').onchange = (e) => { soAbertos = e.target.checked; desenharMsgs(true); };
+  const txt = RP.$('#ch-txt');
+  txt.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); RP.$('#ch-form').requestSubmit(); } };
+  txt.oninput = () => { txt.style.height = 'auto'; txt.style.height = Math.min(160, txt.scrollHeight) + 'px'; };
+  RP.$('#ch-form').onsubmit = enviar;
+  if (atual.tipo === 'projeto') RP.api(`/chat/${url}/enderecos`).then((l) => { ends = l; RP.$('#ch-ends').innerHTML = l.map((e) => `<option value="${RP.esc(e.nome)} · ${RP.esc(e.municipio)}/${e.uf}${e.codigo ? ' · ' + RP.esc(e.codigo) : ''}">`).join(''); }).catch(() => {});
+  desenharCanais();
+  await puxar(true);
+  RP.api(`/chat/${url}/lido`, { method: 'POST' }).then(carregarCanais).catch(() => {});
+  clearInterval(tPoll); tPoll = setInterval(() => puxar(false), 4000);
+  txt.focus();
+}
+
+async function puxar(primeira) {
+  if (!atual) return;
+  const url = atual.url;
+  try {
+    const novas = await RP.api(`/chat/${url}/mensagens${ultimoId ? '?depois=' + ultimoId : ''}`);
+    if (!atual || atual.url !== url) return;
+    if (novas.length) { msgs.push(...novas); ultimoId = novas[novas.length - 1].id; desenharMsgs(primeira || perto()); if (!primeira) RP.api(`/chat/${url}/lido`, { method: 'POST' }).catch(() => {}); }
+    else if (primeira) desenharMsgs(true);
+  } catch (_) { /* sem rede: tenta de novo */ }
+}
+const perto = () => { const b = RP.$('#ch-msgs'); return !b || b.scrollHeight - b.scrollTop - b.clientHeight < 120; };
+
+function desenharMsgs(rolar) {
+  const box = RP.$('#ch-msgs'); if (!box) return;
+  const lista = soAbertos ? msgs.filter((m) => m.tipo !== 'mensagem' && !m.resolvido) : msgs;
+  if (!lista.length) { box.innerHTML = `<div class="ch-vazio"><b>${soAbertos ? 'Nenhum pedido ou ocorrência em aberto.' : 'Nenhuma mensagem ainda.'}</b><span class="muted">${soAbertos ? 'Tudo resolvido neste canal.' : 'Use “Pedido” para material e “Ocorrência” para problemas em campo: eles ficam marcados até alguém resolver.'}</span></div>`; return; }
+  let dia = '';
+  box.innerHTML = lista.map((m, i) => {
+    const d = diaTxt(m.criado_em), sep = d !== dia ? `<div class="ch-dia"><span>${d}</span></div>` : ''; dia = d;
+    const meu = m.usuario_id === S.user.id, prev = lista[i - 1], junto = prev && !sep && prev.usuario_id === m.usuario_id && new Date(m.criado_em) - new Date(prev.criado_em) < 5 * 60000 && m.tipo === 'mensagem';
+    const [tn, tc] = TIPO[m.tipo] || TIPO.mensagem;
+    return `${sep}<div class="ch-m${meu ? ' meu' : ''}${junto ? ' junto' : ''}">${junto ? '' : `<div class="ch-quem"><b>${RP.esc(m.usuario || 'Sistema')}</b><small>${hora(m.criado_em)}</small></div>`}
+      <div class="ch-bolha ${tc}${m.resolvido ? ' resolvido' : ''}">${m.tipo !== 'mensagem' ? `<span class="ch-tag">${tn}${m.resolvido ? ' · resolvido' : ''}</span>` : ''}${m.endereco ? `<span class="ch-end">📍 ${RP.esc(m.endereco)} · ${RP.esc(m.municipio)}/${m.uf}</span>` : ''}
+        <div class="ch-t">${RP.esc(m.texto).replace(/\n/g, '<br>')}</div>
+        ${m.tipo !== 'mensagem' ? `<button type="button" class="ch-res" data-r="${m.id}" data-v="${m.resolvido ? '0' : '1'}">${m.resolvido ? 'Reabrir' : 'Marcar como resolvido'}</button>` : ''}</div></div>`;
+  }).join('');
+  RP.$$('[data-r]', box).forEach((b) => (b.onclick = async () => {
+    try { await RP.api(`/chat/mensagens/${b.dataset.r}/resolver`, { method: 'POST', body: { resolvido: b.dataset.v === '1' } });
+      const m = msgs.find((x) => x.id === +b.dataset.r); if (m) m.resolvido = b.dataset.v === '1'; desenharMsgs(false); carregarCanais(); } catch (e) { RP.toast(e.message); }
+  }));
+  if (rolar) box.scrollTop = box.scrollHeight;
+}
+
+async function enviar(e) {
+  e.preventDefault();
+  const txt = RP.$('#ch-txt'), texto = txt.value.trim(); if (!texto) return;
+  const ev = RP.$('#ch-end')?.value.trim();
+  const end = ev ? ends.find((x) => ev.startsWith(x.nome + ' · ')) : null;
+  if (ev && !end) { RP.toast('Escolha o endereço da lista ou deixe em branco'); return; }
+  const tipo = RP.$('#ch-tipo').value;
+  txt.value = ''; txt.style.height = 'auto';
+  try { await RP.api(`/chat/${atual.url}/mensagens`, { method: 'POST', body: { texto, tipo, endereco_id: end ? end.id : null } }); RP.$('#ch-tipo').value = 'mensagem'; if (RP.$('#ch-end')) RP.$('#ch-end').value = ''; await puxar(false); desenharMsgs(true); carregarCanais(); }
+  catch (err) { txt.value = texto; RP.toast(err.message); }
+}
+</script>
+</body>
+</html>
