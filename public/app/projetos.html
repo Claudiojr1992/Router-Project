@@ -24,7 +24,7 @@ let S, user, pessoas = [], proj = null, filtro = { q: '', uf: '', resp: '', et: 
   user = S.user;
   pessoas = await RP.api('/pessoas');
   const id = new URLSearchParams(location.search).get('id');
-  if (id) abrir(+id); else lista();
+  if (id) { await abrir(+id); if (new URLSearchParams(location.search).get('acao') === 'distribuir' && Shell.acao('distribuir')) distribuir(); } else lista();
 })();
 
 async function lista() {

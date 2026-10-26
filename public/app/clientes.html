@@ -16,7 +16,8 @@
 <script>
 const UFS = 'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
 let S, cli = null, aba = 'enderecos', contratoSel = null, ends = [], q = '', itensCt = [], etapasCli = [], fEtapa = '', fEquipe = '', vista = 'abertos', regrasInfo = { itens: [], regras: [] };
-let empresas = [];
+let empresas = [], prep = null;
+let guiaAberto = (() => { try { return localStorage.getItem('rp-guia') !== '0'; } catch (_) { return true; } })();
 let verItens = (() => { try { return localStorage.getItem('rp-ver-itens') === '1'; } catch (_) { return false; } })();
 // quantidade de um item do contrato no endereço (Câmera sem item cadastrado usa o campo câmeras)
 const qtdItem = (e, nome) => { const it = (e.itens || []).find((x) => normTxt(x.nome) === normTxt(nome)); return it ? it.quantidade : (ehCamera(nome) ? e.cameras || 0 : 0); };
@@ -55,7 +56,7 @@ const f = (id, label, val = '', extra = '') => `<div class="field"><label for="$
 const val = (el, id) => RP.$('#' + id, el).value;
 
 (async () => {
-  S = await Shell.init({ key: 'clientes', title: 'Clientes', sub: 'Clientes, contratos e os endereços de cada contrato', perfis: Shell.ESC });
+  S = await Shell.init({ key: 'clientes', title: 'Clientes e contratos', sub: 'Clientes, contratos e os endereços de cada contrato', perfis: Shell.ESC });
   empresas = await RP.api('/empresas').catch(() => []);
   const qs = new URLSearchParams(location.search);
   const id = qs.get('id');
@@ -79,8 +80,8 @@ async function lista() {
 }
 
 async function carregarContrato() {
-  if (contratoSel) [ends, itensCt] = await Promise.all([RP.api(`/contratos/${contratoSel}/enderecos`), RP.api(`/contratos/${contratoSel}/itens`)]);
-  else { ends = []; itensCt = []; }
+  if (contratoSel) [ends, itensCt, prep] = await Promise.all([RP.api(`/contratos/${contratoSel}/enderecos`), RP.api(`/contratos/${contratoSel}/itens`), RP.api(`/contratos/${contratoSel}/preparacao`).catch(() => null)]);
+  else { ends = []; itensCt = []; prep = null; }
   [etapasCli, regrasInfo] = cli ? await Promise.all([RP.api(`/clientes/${cli.id}/etapas`), RP.api(`/clientes/${cli.id}/equipe-regras`)]) : [[], { itens: [], regras: [] }];
 }
 
@@ -88,7 +89,7 @@ async function abrir(id) {
   cli = await RP.api('/clientes/' + id);
   history.replaceState(null, '', '/app/clientes.html?id=' + id);
   S.sub.textContent = cli.razao_social || cli.nome;
-  S.actions.innerHTML = '<button class="btn sm" id="voltar">← Clientes</button>';
+  S.actions.innerHTML = '<button class="btn sm" id="voltar">← Todos os clientes</button>';
   RP.$('#voltar').onclick = lista;
   if (!contratoSel || !cli.contratos.some((c) => c.id === contratoSel)) contratoSel = cli.contratos[0]?.id || null;
   await carregarContrato();
@@ -133,7 +134,7 @@ function tabEnderecos(el) {
     return { t: i + 1, n: l.length, ini: ini[0], fim: ini[ini.length - 1], atr: l.filter(atrasado).length }; });
   const semEq = abertos.filter((e) => !e.equipe).length, nAtr = abertos.filter(atrasado).length;
   const chip = (v, html, extra = '') => `<button type="button" class="eqc" data-feq="${v}" aria-pressed="${fEquipe === v}" ${extra}>${html}</button>`;
-  el.innerHTML = `<div class="eqbar">
+  el.innerHTML = `${guia(abertos)}<div class="eqbar">
       <span class="lbl">Equipes</span>
       <select class="input" id="neq" style="width:auto;min-width:130px" aria-label="Quantidade de equipes do projeto">
         <option value="">Sem equipes</option>${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<option value="${n}" ${n === nEq ? 'selected' : ''}>${n} equipe${n > 1 ? 's' : ''}</option>`).join('')}</select>
@@ -148,13 +149,19 @@ function tabEnderecos(el) {
     </div>
     <div class="vtabs" role="tablist">${[['abertos', `A atacar (${abertos.length})`], ['concluidos', `Concluídos (${feitos.length})`], ['todos', `Todos (${ends.length})`], ...(foraR.length || vista === 'fora' ? [['fora', `Fora da rota (${foraR.length})`]] : [])].map(([k2, t]) => `<button type="button" role="tab" class="eqc" data-vista="${k2}" aria-pressed="${vista === k2}">${t}</button>`).join('')}</div>
     <div class="toolbar" style="padding:12px 16px">
-      <select class="input" id="ct" style="max-width:280px" aria-label="Contrato">${cli.contratos.map((c) => `<option value="${c.id}" ${c.id === contratoSel ? 'selected' : ''}>${RP.esc(c.numero)} (${c.enderecos})</option>`).join('')}</select>
-      <input class="input" id="q" placeholder="Buscar endereço" value="${RP.esc(q)}" aria-label="Buscar">
-      <select class="input" id="fet" style="max-width:200px" aria-label="Etapa"><option value="">Todas as etapas</option><option value="sem" ${fEtapa === 'sem' ? 'selected' : ''}>Sem etapa</option>
+      <select class="input" id="ct" style="max-width:240px" aria-label="Contrato">${cli.contratos.map((c) => `<option value="${c.id}" ${c.id === contratoSel ? 'selected' : ''}>${RP.esc(c.numero)} (${c.enderecos})</option>`).join('')}</select>
+      <input class="input" id="q" placeholder="Buscar endereço" value="${RP.esc(q)}" aria-label="Buscar" style="max-width:240px">
+      <select class="input" id="fet" style="max-width:190px" aria-label="Etapa"><option value="">Todas as etapas</option><option value="sem" ${fEtapa === 'sem' ? 'selected' : ''}>Sem etapa</option>
         ${etapasCli.map((t) => `<option value="${t.id}" ${String(t.id) === fEtapa ? 'selected' : ''}>${RP.esc(t.nome)} · ${RP.fmtData(t.data_inicio)}</option>`).join('')}</select>
-      ${vis.length && vista !== 'concluidos' ? `<button class="btn sm" id="mvet" title="Muda etapa, equipe, início ou rota de todos os endereços listados">Alterar os ${vis.length} listados</button>` : ''}
-      ${vis.length && podeExcluir() ? `<button class="btn sm danger" id="delv" title="Exclui os endereços listados agora (filtros e busca)">Excluir os ${vis.length} listados</button>` : ''}
-      <span class="spacer"></span><button class="btn sm${verItens ? ' primary' : ''}" id="vit" aria-pressed="${verItens}" title="Mostra uma coluna para cada item do contrato (câmera, servidor, switch…)">${verItens ? 'Ocultar itens do contrato' : 'Ver todos os itens do contrato'}</button><button class="btn sm" id="itp" title="Equipamentos deste contrato">Itens do projeto (${itensCt.length})</button><button class="btn sm" id="exp">Exportar</button><button class="btn sm" id="imp">Importar planilha</button><button class="btn sm primary" id="ne">+ Endereço</button></div>
+      <span class="spacer"></span>
+      <details class="mais"><summary class="btn sm" title="Ações com os endereços listados, itens e exportação">Mais ações</summary><div class="mais-menu" role="menu">
+        ${vis.length && vista !== 'concluidos' ? `<button type="button" role="menuitem" id="mvet">Alterar os ${vis.length} listados<small>Etapa, equipe, início ou rota de uma vez</small></button>` : ''}
+        <button type="button" role="menuitem" id="vit" aria-pressed="${verItens}">${verItens ? 'Ocultar colunas dos itens' : 'Mostrar uma coluna por item'}<small>Câmera, servidor, switch… lado a lado</small></button>
+        <button type="button" role="menuitem" id="itp">Itens do projeto (${itensCt.length})<small>Equipamentos deste contrato</small></button>
+        <button type="button" role="menuitem" id="exp">Exportar endereços<small>Excel ou CSV</small></button>
+        ${vis.length && podeExcluir() ? `<button type="button" role="menuitem" class="perigo" id="delv">Excluir os ${vis.length} listados</button>` : ''}
+      </div></details>
+      <button class="btn sm" id="imp">Importar planilha</button><button class="btn sm primary" id="ne">+ Endereço</button></div>
     <div class="scroll"><table class="tbl"><thead><tr><th>Código</th><th>Endereço</th><th>Município</th><th>UF</th><th>Etapa</th><th>Equipe</th><th>${vista === 'concluidos' ? 'Concluído em' : 'Início'}</th>${verItens ? itensCt.map((i) => `<th style="text-align:right">${RP.esc(i.nome)}</th>`).join('') : '<th>Equipamentos</th>'}<th>Status</th><th title="Marcado = entra no Painel de rotas e na distribuição">Rota</th></tr></thead>
     <tbody>${vis.map((e) => `<tr class="click" data-id="${e.id}"><td>${RP.esc(e.codigo || '—')}</td><td><b>${RP.esc(e.nome)}</b>${e.na_rota === false ? ' <span class="tag-fora">fora da rota</span>' : ''}${e.logradouro ? `<div class="muted" style="font-size:.82rem">${RP.esc(e.logradouro)}</div>` : ''}</td><td>${RP.esc(e.municipio)}</td><td>${e.uf}</td><td style="white-space:nowrap">${e.etapa ? `${RP.esc(e.etapa)}${e.ordem_etapa ? ` · <b>${e.ordem_etapa}º</b>` : ''}<div class="muted" style="font-size:.78rem">início ${RP.fmtData(e.etapa_inicio)}</div>` : '<span class="muted">—</span>'}</td>
       <td style="white-space:nowrap">${e.equipe ? `<span class="eqdot" style="--c:${corEq(e.equipe)}"></span>Equipe ${e.equipe}` : '<span class="muted">—</span>'}</td>
@@ -167,6 +174,8 @@ function tabEnderecos(el) {
   const q$ = RP.$('#q', el); q$.oninput = () => { q = q$.value; clearTimeout(q$._t); q$._t = setTimeout(() => { render(); RP.$('#q').focus(); }, 250); };
   RP.$('#ne', el).onclick = () => endereco(null);
   RP.$('#imp', el).onclick = importar;
+  ligarGuia(el);
+  RP.$$('.mais-menu button', el).forEach((b) => b.addEventListener('click', () => b.closest('details').removeAttribute('open')));
   RP.$('#exp', el).onclick = exportar;
   RP.$('#itp', el).onclick = () => itensProjeto(contratoSel);
   RP.$('#etp', el).onclick = etapasProjeto;
@@ -192,6 +201,48 @@ function tabEnderecos(el) {
     catch (e2) { cb.checked = !cb.checked; RP.toast(e2.message); }
   }));
   RP.$$('tr.click', el).forEach((r) => (r.onclick = () => endereco(ends.find((e) => e.id === +r.dataset.id))));
+}
+
+// ---------- Preparação do projeto: os passos que faltam, cada um com o botão que resolve ----------
+function passosPrep(abertos) {
+  const nEq = cli.equipes || 0;
+  const semPlano = abertos.filter((e) => e.na_rota !== false && (!e.equipe || !e.inicio_previsto)).length;
+  const ct = cli.contratos.find((c) => c.id === contratoSel);
+  return [
+    { k: 'end', t: 'Endereços', ok: ends.length > 0, info: ends.length ? `${RP.fmtN(ends.length)} cadastrados` : 'Importe a planilha ou inclua um a um',
+      acoes: [['imp', 'Importar planilha', true], ['ne', '+ Endereço']] },
+    { k: 'atv', t: 'Atividades', ok: !!(prep && prep.atividades), info: prep && prep.atividades ? `${prep.atividades} atividades em cada endereço` : 'Use as atividades padrão e ajuste se precisar',
+      acoes: prep && prep.atividades ? [['link:/app/atividades.html?cliente=' + cli.id + '&contrato=' + contratoSel, 'Ajustar']] : [['padrao', 'Usar as atividades padrão', true]] },
+    { k: 'eq', t: 'Equipes e datas', ok: ends.length > 0 && nEq > 0 && !semPlano, info: !nEq ? 'Escolha quantas equipes vão atuar' : semPlano ? `${semPlano} endereço(s) sem equipe ou início` : `${nEq} equipe(s) com datas`,
+      acoes: !nEq ? [['neq', 'Definir equipes', true]] : [['dist', semPlano ? 'Distribuir equipes e datas' : 'Redistribuir', !!semPlano]] },
+    { k: 'resp', t: 'Responsáveis', ok: !!(prep && prep.tarefas && !prep.sem_responsavel), info: !prep || !prep.tarefas ? 'Aparece quando houver endereços e atividades' : prep.sem_responsavel ? `${RP.fmtN(prep.sem_responsavel)} atividade(s) sem responsável` : 'Todas as atividades têm responsável',
+      acoes: prep && prep.tarefas ? [['link:/app/projetos.html?id=' + contratoSel + (prep.sem_responsavel ? '&acao=distribuir' : ''), prep.sem_responsavel ? 'Distribuir atividades' : 'Abrir execução', !!prep.sem_responsavel]] : [] },
+  ].map((p) => ({ ...p, ct }));
+}
+function guia(abertos) {
+  if (!contratoSel) return '';
+  const ps = passosPrep(abertos), feitos = ps.filter((p) => p.ok).length, prox = ps.find((p) => !p.ok);
+  const fim = `<a class="btn sm" href="/app/rota.html?c=${cli.id}">Painel de rotas e PDF</a><a class="btn sm" href="/app/projetos.html?id=${contratoSel}">Execução do projeto</a>`;
+  if (!prox) return `<div class="guia ok"><span class="guia-sel">✓</span><b>Projeto pronto para executar</b><span class="muted">Endereços, atividades, equipes e responsáveis definidos.</span><span class="spacer"></span>${fim}</div>`;
+  return `<details class="guia" ${guiaAberto ? 'open' : ''}><summary><b>Preparação do projeto</b><span class="guia-prog"><i style="width:${feitos / ps.length * 100}%"></i></span><span class="muted">${feitos} de ${ps.length} prontos · próximo: <b style="color:var(--ink)">${prox.t}</b></span></summary>
+    <ol class="guia-passos">${ps.map((p, i) => `<li class="${p.ok ? 'ok' : p === prox ? 'agora' : ''}"><div class="guia-h"><span class="guia-n">${p.ok ? '✓' : i + 1}</span><div class="guia-t"><b>${p.t}</b><small>${p.info}</small></div></div>
+      <div class="guia-a">${p.acoes.map(([a, t, pri]) => a.startsWith('link:') ? `<a class="btn sm${pri && p === prox ? ' primary' : ''}" href="${a.slice(5)}">${t}</a>` : `<button type="button" class="btn sm${pri && p === prox ? ' primary' : ''}" data-guia="${a}">${t}</button>`).join('')}</div></li>`).join('')}</ol>
+    <div class="guia-fim"><span class="muted">Depois de pronto, acompanhe por aqui:</span>${fim}</div></details>`;
+}
+function ligarGuia(el) {
+  const g = RP.$('details.guia', el);
+  if (g) g.addEventListener('toggle', () => { guiaAberto = g.open; try { localStorage.setItem('rp-guia', g.open ? '1' : '0'); } catch (_) { /* sem armazenamento */ } });
+  RP.$$('[data-guia]', el).forEach((b) => (b.onclick = () => {
+    const a = b.dataset.guia;
+    if (a === 'imp') importar();
+    else if (a === 'ne') endereco(null);
+    else if (a === 'dist') distribuir();
+    else if (a === 'neq') { const s2 = RP.$('#neq', el); s2.focus(); s2.classList.add('pisca'); setTimeout(() => s2.classList.remove('pisca'), 1600); RP.toast('Escolha quantas equipes vão atuar neste projeto'); }
+    else if (a === 'padrao') RP.busy(b, async () => {
+      try { await RP.api(`/contratos/${contratoSel}/atividades/padrao`, { method: 'POST' }); RP.toast('Atividades padrão incluídas em todos os endereços'); await carregarContrato(); render(); }
+      catch (e) { RP.toast(e.message); }
+    });
+  }));
 }
 
 // ---------- Importar endereços colando do Excel ----------
@@ -687,16 +738,17 @@ function ligarEmpresa(el) { const s2 = RP.$('#c-emp', el); if (s2) s2.onchange =
 const contratoBody = (el) => ({ numero: val(el, 'c-num'), tipo: val(el, 'c-tipo'), objeto: val(el, 'c-obj'), vigencia_inicio: val(el, 'c-ini'), vigencia_fim: val(el, 'c-fim'),
   valor_camera: val(el, 'c-vc').replace(',', '.'), valor_endereco: val(el, 'c-ve').replace(',', '.'), regra_cobranca: val(el, 'c-reg') });
 
+const blocoPadrao = `<label class="check" style="margin-top:14px"><input type="checkbox" id="c-pad" checked><span><b>Já incluir as atividades padrão</b><br><span class="muted">Coordenação, infra, instalação, configuração, validação e handover. Dá para ajustar depois.</span></span></label>`;
 const blocoItens = `<h3 style="font-size:1.15rem;margin:20px 0 4px">Itens do projeto</h3>
     <p class="muted" style="margin:0 0 10px;font-size:.9rem">Equipamentos que serão instalados nos endereços (câmera, servidor, switch…). Digite e use + para incluir mais. Em cada endereço você informa as quantidades, à mão ou pela planilha.</p>
     <div class="itbox"></div><button class="btn sm itadd" type="button">+ Item</button>`;
 
 function contrato(c) {
-  const d = RP.drawer(c ? 'Editar contrato' : 'Novo contrato', (c ? '<div class="row" style="justify-content:flex-end;margin:-4px 0 6px"><button type="button" class="btn sm" id="c-hist">Histórico de alterações</button></div>' : '') + contratoCampos(c || {}) + (c ? `<div class="field"><label for="c-st">Situação</label><select class="input" id="c-st">${['ativo', 'suspenso', 'encerrado'].map((s) => `<option ${s === c.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>` : blocoItens), {
+  const d = RP.drawer(c ? 'Editar contrato' : 'Novo contrato', (c ? '<div class="row" style="justify-content:flex-end;margin:-4px 0 6px"><button type="button" class="btn sm" id="c-hist">Histórico de alterações</button></div>' : '') + contratoCampos(c || {}) + (c ? `<div class="field"><label for="c-st">Situação</label><select class="input" id="c-st">${['ativo', 'suspenso', 'encerrado'].map((s) => `<option ${s === c.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>` : blocoItens + blocoPadrao), {
     onSave: async (el) => {
       const body = contratoBody(el);
       body.empresa_id = await empresaDoForm(el);
-      if (!c) body.itens = lerItens(el);
+      if (!c) { body.itens = lerItens(el); body.atividades_padrao = RP.$('#c-pad', el).checked; }
       if (c) { body.status = val(el, 'c-st'); await RP.api('/contratos/' + c.id, { method: 'PUT', body }); }
       else { const n = await RP.api(`/clientes/${cli.id}/contratos`, { method: 'POST', body }); contratoSel = n.id; }
       RP.toast('Contrato salvo'); abrir(cli.id);
@@ -731,11 +783,12 @@ function novoCliente() {
     <h3 style="font-size:1.15rem;margin:20px 0 4px">Contrato</h3><p class="muted" style="margin:0 0 12px;font-size:.9rem">Os endereços e as atividades ficam ligados a este contrato. Sem número, ele é criado como “Contrato principal” e você ajusta depois.</p>
     ${contratoCampos({})}
     <div class="field"><label for="k-pdf">PDF do contrato <span class="muted">(opcional, até 10 MB)</span></label><input class="input" id="k-pdf" type="file" accept="application/pdf"></div>
-    ${blocoItens}`, {
+    ${blocoItens}${blocoPadrao}`, {
     saveLabel: 'Criar cliente',
     onSave: async (el) => {
       const body = contratoBody(el);
       body.itens = lerItens(el);
+      body.atividades_padrao = RP.$('#c-pad', el).checked;
       body.empresa_id = await empresaDoForm(el);
       if (!String(body.numero || '').trim()) body.numero = 'Contrato principal';
       const c = await RP.api('/clientes', { method: 'POST', body: dadosBody(el) });

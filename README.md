@@ -578,6 +578,20 @@ O app fica em **`/m/`** (ex.: `https://rotas.suaempresa.com.br/m/`). É um PWA: 
 3. Enviar a medição ao cliente por e-mail direto do Faturamento.
 4. Portal do cliente e avisos em tempo real.
 
+## Como um projeto novo é preparado
+
+O menu segue a ordem do trabalho: **Operação** (o dia a dia), **Preparar projeto** (na ordem em que se monta um projeto) e **Configurações**.
+
+1. **Clientes e contratos → + Novo cliente**: cliente, contrato e itens num formulário só. O contrato já nasce com as **atividades padrão** (dá para desmarcar).
+2. Na tela do cliente, o quadro **Preparação do projeto** mostra os 4 passos e o botão que resolve cada um:
+   - **Endereços**: importar planilha ou incluir um a um;
+   - **Atividades**: já vêm do padrão; "Ajustar" abre a tela de atividades no contrato certo;
+   - **Equipes e datas**: escolher quantas equipes e distribuir;
+   - **Responsáveis**: abre o projeto já com "Distribuir atividades".
+3. Com os 4 prontos, o quadro vira uma linha só, com atalhos para o **Painel de rotas e PDF** e a **Execução do projeto**.
+
+As ações menos usadas da lista de endereços (alterar ou excluir os listados, colunas por item, itens do projeto, exportar) ficam em **Mais ações**.
+
 ## Vercel + Supabase
 
 O mesmo código roda no Vercel como uma função só (`api/index.js`), com o banco no Supabase.

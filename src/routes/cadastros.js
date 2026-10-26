@@ -124,6 +124,33 @@ async function conferirPredecessora(c, contratoId, atividadeId, predId) {
   }
 }
 
+// Copia as atividades padrão para um contrato (do contrato que mais tem atividades, ou a lista base) e cria as tarefas
+async function copiarPadrao(c, contrato) {
+  const origem = (await c.query(`SELECT contrato_id FROM atividades WHERE ativo AND contrato_id <> $1 GROUP BY contrato_id ORDER BY count(*) DESC, contrato_id LIMIT 1`, [contrato])).rows[0];
+  if (origem) {
+    await c.query(`INSERT INTO atividades (contrato_id, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, min_por_camera, faixas, conta_rota, checklist_id, evidencia, ordem, tempo_impacto)
+                   SELECT $1, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, min_por_camera, faixas, conta_rota, checklist_id, evidencia, ordem, tempo_impacto
+                     FROM atividades WHERE contrato_id = $2 AND ativo ORDER BY ordem`, [contrato, origem.contrato_id]);
+    await c.query(`UPDATE atividades n SET predecessora_id = np.id
+                     FROM atividades o JOIN atividades op ON op.id = o.predecessora_id
+                     JOIN atividades np ON np.contrato_id = $1 AND np.nome = op.nome AND np.ativo
+                    WHERE o.contrato_id = $2 AND o.ativo AND n.contrato_id = $1 AND n.nome = o.nome`, [contrato, origem.contrato_id]);
+  } else {
+    const base = [['Coordenação e contato', 'Coordenação', 'Planejamento', 'Coordenador', 'fixo', 1, 'dia', false],
+      ['Infraestrutura e cabos', 'Infra', 'Campo', 'Técnico de campo', 'fixo', 1, 'dia', true],
+      ['Instalação de equipamentos', 'Instalação', 'Campo', 'Técnico de campo', 'fixo', 2, 'dia', true],
+      ['Configuração do servidor e licença', 'Servidor', 'Configuração', 'Analista de configuração', 'fixo', 4, 'hora', true],
+      ['Validação das imagens', 'Validação', 'Validação', 'Técnico de campo', 'fixo', 2, 'hora', true],
+      ['Relatório de entrega e handover', 'Handover', 'Entrega', 'Administrativo', 'fixo', 1, 'dia', false]];
+    for (const [i, a] of base.entries()) {
+      await c.query(`INSERT INTO atividades (contrato_id, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, conta_rota, ordem) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [contrato, ...a, i + 1]);
+    }
+  }
+  await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT e.id, a.id FROM enderecos e JOIN atividades a ON a.contrato_id = e.contrato_id
+                 WHERE e.contrato_id = $1 AND a.ativo ON CONFLICT DO NOTHING`, [contrato]);
+}
+
 module.exports = (app) => {
   const leitura = requer(INTERNOS);
   const escrita = requer(ESCRITORIO);
@@ -183,6 +210,7 @@ module.exports = (app) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [v.id(req.params.id), ...contratoBody(req.body)])).rows[0];
     const itens = validarItens(req.body.itens) || [];
     for (const it of itens) await garantirItem(c, ct.id, it.nome);
+    if (req.body.atividades_padrao !== false) await copiarPadrao(c, ct.id); // um passo a menos: já nasce com as atividades
     return ct;
   }));
 
@@ -493,36 +521,21 @@ module.exports = (app) => {
     return a;
   }));
 
-  // Copia as atividades padrão para um contrato sem atividades (do contrato que mais tem atividades, ou a lista base)
+  // Copia as atividades padrão para um contrato sem atividades
   app.post('/api/contratos/:id/atividades/padrao', gestao, async (req) => db.tx(async (c) => {
     const contrato = v.id(req.params.id);
     const tem = (await c.query(`SELECT count(*)::int AS n FROM atividades WHERE contrato_id = $1 AND ativo`, [contrato])).rows[0].n;
     if (tem) throw new HttpError(400, 'Este contrato já tem atividades');
-    const origem = (await c.query(`SELECT contrato_id FROM atividades WHERE ativo AND contrato_id <> $1 GROUP BY contrato_id ORDER BY count(*) DESC, contrato_id LIMIT 1`, [contrato])).rows[0];
-    if (origem) {
-      await c.query(`INSERT INTO atividades (contrato_id, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, min_por_camera, faixas, conta_rota, checklist_id, evidencia, ordem, tempo_impacto)
-                     SELECT $1, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, min_por_camera, faixas, conta_rota, checklist_id, evidencia, ordem, tempo_impacto
-                       FROM atividades WHERE contrato_id = $2 AND ativo ORDER BY ordem`, [contrato, origem.contrato_id]);
-      await c.query(`UPDATE atividades n SET predecessora_id = np.id
-                       FROM atividades o JOIN atividades op ON op.id = o.predecessora_id
-                       JOIN atividades np ON np.contrato_id = $1 AND np.nome = op.nome AND np.ativo
-                      WHERE o.contrato_id = $2 AND o.ativo AND n.contrato_id = $1 AND n.nome = o.nome`, [contrato, origem.contrato_id]);
-    } else {
-      const base = [['Coordenação e contato', 'Coordenação', 'Planejamento', 'Coordenador', 'fixo', 1, 'dia', false],
-        ['Infraestrutura e cabos', 'Infra', 'Campo', 'Técnico de campo', 'fixo', 1, 'dia', true],
-        ['Instalação de equipamentos', 'Instalação', 'Campo', 'Técnico de campo', 'fixo', 2, 'dia', true],
-        ['Configuração do servidor e licença', 'Servidor', 'Configuração', 'Analista de configuração', 'fixo', 4, 'hora', true],
-        ['Validação das imagens', 'Validação', 'Validação', 'Técnico de campo', 'fixo', 2, 'hora', true],
-        ['Relatório de entrega e handover', 'Handover', 'Entrega', 'Administrativo', 'fixo', 1, 'dia', false]];
-      for (const [i, a] of base.entries()) {
-        await c.query(`INSERT INTO atividades (contrato_id, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, conta_rota, ordem) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [contrato, ...a, i + 1]);
-      }
-    }
-    await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT e.id, a.id FROM enderecos e JOIN atividades a ON a.contrato_id = e.contrato_id
-                   WHERE e.contrato_id = $1 AND a.ativo ON CONFLICT DO NOTHING`, [contrato]);
+    await copiarPadrao(c, contrato);
     return { ok: true };
   }));
+
+  // Preparação do projeto (guia na tela do cliente): o que já está pronto em cada contrato
+  app.get('/api/contratos/:id/preparacao', leitura, async (req) => db.one(
+    `SELECT (SELECT count(*)::int FROM atividades a WHERE a.contrato_id = $1 AND a.ativo) AS atividades,
+            count(t.id)::int AS tarefas,
+            count(t.id) FILTER (WHERE t.responsavel_id IS NULL AND t.status <> 'concluida')::int AS sem_responsavel
+       FROM enderecos e LEFT JOIN tarefas t ON t.endereco_id = e.id WHERE e.contrato_id = $1`, [v.id(req.params.id)]));
 
   app.put('/api/atividades/:id', gestao, async (req) => db.tx(async (c) => {
     const id = v.id(req.params.id);

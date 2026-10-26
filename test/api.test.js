@@ -52,6 +52,15 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     assert.ok(end.id);
   });
 
+  await t.test('contrato novo já nasce com as atividades padrão e o guia mostra o que falta', async () => {
+    const p = (await admin.get(`/api/contratos/${ct}/preparacao`)).json;
+    assert.ok(p.atividades >= 1, 'atividades padrão');
+    assert.ok(p.tarefas >= p.atividades, 'uma tarefa por atividade no endereço');
+    assert.equal(p.sem_responsavel, p.tarefas);
+    const sem = await admin.post(`/api/clientes/${cli.id}/contratos`, { numero: 'S-' + sufixo, tipo: 'aditivo', atividades_padrao: false });
+    assert.equal((await admin.get(`/api/contratos/${sem.json.id}/preparacao`)).json.atividades, 0);
+  });
+
   await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
     const r = await admin.put('/api/enderecos/' + end.id, { nome: 'Agência Teste', logradouro: 'Rua Nova, 10', municipio: 'Fortaleza', uf: 'CE', cameras: 6 });
     assert.equal(r.status, 200);

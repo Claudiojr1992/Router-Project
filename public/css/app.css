@@ -461,3 +461,37 @@ a.pjedit{text-decoration:none}
 .rvinfo{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
 .rvchip{--c:var(--muted);display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:600;padding:4px 10px;border-radius:999px;color:var(--c);background:color-mix(in srgb,var(--c) 10%,var(--panel));border:1px solid color-mix(in srgb,var(--c) 30%,transparent);text-decoration:none}
 .rvchip i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+/* Preparação do projeto (guia de passos na tela do cliente) */
+.guia{border-bottom:1px solid var(--line);background:var(--panel)}
+.guia>summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;cursor:pointer;list-style:none}
+.guia>summary::-webkit-details-marker{display:none}
+.guia>summary::after{content:'';width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin-left:auto;transition:transform .15s}
+.guia[open]>summary::after{transform:rotate(-135deg)}
+.guia-prog{width:120px;height:6px;border-radius:99px;background:var(--soft);overflow:hidden;border:1px solid var(--line)}
+.guia-prog i{display:block;height:100%;background:var(--ok)}
+.guia-passos{list-style:none;margin:0;padding:0 16px 8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+.guia-passos li{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel)}
+.guia-passos li.agora{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.guia-passos li.ok{background:var(--soft)}
+.guia-h{display:flex;gap:10px;align-items:flex-start}
+.guia-n{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;border:1.5px solid var(--line);font-weight:700;font-size:.85rem;color:var(--muted)}
+.guia-passos li.ok .guia-n{background:var(--ok);border-color:var(--ok);color:#fff}
+.guia-passos li.agora .guia-n{border-color:var(--accent);color:var(--accent)}
+.guia-t{display:flex;flex-direction:column;gap:2px}
+.guia-t small{color:var(--muted);font-size:.84rem}
+.guia-a{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
+.guia-fim{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 16px 14px}
+.guia.ok{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px}
+.guia-sel{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--ok);color:#fff;font-weight:700;font-size:.8rem}
+.pisca{animation:pisca .5s ease-in-out 3}
+@keyframes pisca{50%{box-shadow:0 0 0 3px var(--accent)}}
+/* Menu "Mais ações" */
+.mais{position:relative}
+.mais>summary{list-style:none}
+.mais>summary::-webkit-details-marker{display:none}
+.mais>summary::after{content:'';width:6px;height:6px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg) translate(-2px,-2px);margin-left:2px}
+.mais-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:270px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:6px;display:flex;flex-direction:column}
+.mais-menu button{all:unset;box-sizing:border-box;display:flex;flex-direction:column;gap:1px;padding:9px 10px;border-radius:7px;cursor:pointer;font-weight:600;font-size:.9rem;color:var(--ink)}
+.mais-menu button:hover,.mais-menu button:focus-visible{background:var(--soft)}
+.mais-menu button small{font-weight:400;color:var(--muted);font-size:.8rem}
+.mais-menu button.perigo{color:var(--err);border-top:1px solid var(--line);border-radius:0 0 7px 7px;margin-top:4px}

@@ -23,15 +23,19 @@ function tempoTxt(a) {
 }
 
 (async () => {
-  S = await Shell.init({ key: 'atividades', title: 'Atividades', sub: 'Escolha o cliente e cadastre as atividades de cada contrato', perfis: Shell.ESC });
+  S = await Shell.init({ key: 'atividades', title: 'Atividades', sub: 'O que é feito em cada endereço do contrato: tempo, quem executa, checklist e dependência', perfis: Shell.ESC });
   [clientes, checklists] = await Promise.all([RP.api('/clientes'), RP.api('/checklists')]);
   if (!clientes.length) { S.content.innerHTML = '<div class="card empty">Cadastre um cliente primeiro.</div>'; return; }
-  await escolher(clientes[0].id);
+  // vindo da tela do cliente (?cliente=&contrato=) já abre no contrato certo
+  const qs = new URLSearchParams(location.search);
+  const pedido = clientes.find((c) => c.id === +qs.get('cliente'));
+  await escolher(pedido ? pedido.id : clientes[0].id, +qs.get('contrato') || null);
 })();
 
-async function escolher(id) {
+async function escolher(id, contrato = null) {
   cli = await RP.api('/clientes/' + id);
-  contratoSel = cli.contratos[0]?.id || null;
+  contratoSel = (contrato && cli.contratos.some((c) => c.id === contrato) ? contrato : cli.contratos[0]?.id) || null;
+  history.replaceState(null, '', `/app/atividades.html?cliente=${cli.id}${contratoSel ? '&contrato=' + contratoSel : ''}`);
   await carregar();
 }
 
@@ -43,9 +47,9 @@ async function carregar() {
 function render() {
   const gestor = Shell.pode('atividades', 'editar');
   S.content.innerHTML = `
-    <div class="row" style="gap:8px">${clientes.map((c) => `<button class="btn sm ${c.id === cli.id ? 'primary' : ''}" data-c="${c.id}">${RP.esc(c.nome)}</button>`).join('')}</div>
     <div class="card">
       <header class="toolbar">
+        <select class="input" id="cl" aria-label="Cliente" style="max-width:260px">${clientes.map((c) => `<option value="${c.id}" ${c.id === cli.id ? 'selected' : ''}>${RP.esc(c.nome)}</option>`).join('')}</select>
         <select class="input" id="ct" aria-label="Contrato" ${cli.contratos.length ? '' : 'hidden'}>${cli.contratos.map((c) => `<option value="${c.id}" ${c.id === contratoSel ? 'selected' : ''}>${RP.esc(c.numero)} · ${c.enderecos} endereços</option>`).join('')}</select>
         <span class="spacer"></span>${gestor && contratoSel ? '<button class="btn sm primary" id="na">+ Nova atividade</button>' : ''}
       </header>
@@ -57,8 +61,8 @@ function render() {
       : `<div class="empty"><p style="margin:0 0 12px">Nenhuma atividade neste contrato ainda.</p>${gestor ? '<button class="btn primary" id="padrao">Usar as atividades padrão</button> <span class="muted" style="margin:0 8px">ou</span> use “+ Nova atividade”.' : ''}</div>`}
     </div>
     <p class="muted" style="font-size:.88rem;margin:0"><b>Impacto no tempo</b>: “Soma” entra nos dias de cada endereço; “Em paralelo” acontece junto (conta só se for maior que a soma); “Sem impacto” não muda o prazo. Ligue “Dias: pelas atividades” no Painel de rotas para usar esse cálculo. <b>Depende de</b>: a atividade só pode ser concluída depois que a predecessora estiver concluída no mesmo endereço. Cada atividade nova vira uma tarefa em todos os endereços do contrato.</p>`;
-  RP.$$('[data-c]', S.content).forEach((b) => (b.onclick = () => escolher(+b.dataset.c)));
-  RP.$('#ct')?.addEventListener('change', (e) => { contratoSel = +e.target.value; carregar(); });
+  RP.$('#cl').onchange = (e) => escolher(+e.target.value);
+  RP.$('#ct')?.addEventListener('change', (e) => { contratoSel = +e.target.value; history.replaceState(null, '', `/app/atividades.html?cliente=${cli.id}&contrato=${contratoSel}`); carregar(); });
   RP.$('#padrao')?.addEventListener('click', (e) => RP.busy(e.target, async () => {
     try { await RP.api(`/contratos/${contratoSel}/atividades/padrao`, { method: 'POST' }); RP.toast('Atividades padrão incluídas'); await carregar(); } catch (er) { RP.toast(er.message); }
   }));
