@@ -580,15 +580,20 @@ O app fica em **`/m/`** (ex.: `https://rotas.suaempresa.com.br/m/`). É um PWA: 
 
 ## Como um projeto novo é preparado
 
-O menu segue a ordem do trabalho: **Operação** (o dia a dia), **Preparar projeto** (na ordem em que se monta um projeto) e **Configurações**.
+O menu segue a ordem do trabalho: **Operação** (Projetos, Tarefas, Faturamento, Chat, App), **Preparar projeto** (Atividades, Checklists, Técnicos e times) e **Configurações**.
 
-1. **Clientes e contratos → + Novo cliente**: cliente, contrato e itens num formulário só. O contrato já nasce com as **atividades padrão** (dá para desmarcar).
-2. Na tela do cliente, o quadro **Preparação do projeto** mostra os 4 passos e o botão que resolve cada um:
-   - **Endereços**: importar planilha ou incluir um a um;
-   - **Atividades**: já vêm do padrão; "Ajustar" abre a tela de atividades no contrato certo;
-   - **Equipes e datas**: escolher quantas equipes e distribuir;
-   - **Responsáveis**: abre o projeto já com "Distribuir atividades".
-3. Com os 4 prontos, o quadro vira uma linha só, com atalhos para o **Painel de rotas e PDF** e a **Execução do projeto**.
+**Projetos** é a lista única: um card por cliente, com meta, avanço, atenção e pendências. Cada projeto tem três abas no topo:
+- **Painel e rotas** (`rota.html?c=`): plano por equipe, mapa, regras, base de saída e PDF;
+- **Execução** (`projetos.html?cliente=` ou `?id=<contrato>`): matriz endereço × atividade, responsáveis e monitoramento. Com mais de um contrato, o seletor fica ao lado das abas;
+- **Cadastro e endereços** (`clientes.html?id=`): endereços, contratos, equipes, datas e o quadro de preparação.
+
+As abas aparecem conforme as permissões de cada perfil. As URLs antigas (`/app/rota.html`, `/app/clientes.html` sem projeto) levam para a lista.
+
+1. **Projetos → + Novo projeto**: cliente, contrato e itens num formulário só. O contrato já nasce com as **atividades padrão** (dá para desmarcar).
+2. Em **Cadastro e endereços**, o quadro **Preparação do projeto** mostra os 4 passos e o botão que resolve cada um: endereços, atividades, equipes e datas, responsáveis.
+3. Com os 4 prontos, o quadro vira uma linha só; o acompanhamento segue pelas abas **Painel e rotas** e **Execução**.
+
+**Tarefas** junta "Minhas atividades" e "Delegadas": filtro **Comigo** (permissão *Tarefas · Comigo*) e **Delegadas ao escritório** (permissão *Tarefas · Delegadas ao escritório*). As permissões continuam separadas; só a tela é uma. `minhas.html` e `delegadas.html` redirecionam.
 
 As ações menos usadas da lista de endereços (alterar ou excluir os listados, colunas por item, itens do projeto, exportar) ficam em **Mais ações**.
 

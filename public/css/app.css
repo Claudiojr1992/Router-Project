@@ -495,3 +495,19 @@ a.pjedit{text-decoration:none}
 .mais-menu button:hover,.mais-menu button:focus-visible{background:var(--soft)}
 .mais-menu button small{font-weight:400;color:var(--muted);font-size:.8rem}
 .mais-menu button.perigo{color:var(--err);border-top:1px solid var(--line);border-radius:0 0 7px 7px;margin-top:4px}
+/* Abas de um projeto: Painel e rotas · Execução · Cadastro e endereços */
+.pjabas{display:flex;align-items:flex-end;gap:2px;padding:4px 24px 0;margin:0 0 4px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin}
+.pjabas>a{flex:none;display:inline-flex;align-items:center;gap:6px;padding:10px 14px;font-weight:600;color:var(--muted);text-decoration:none;border-bottom:3px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.pjabas>a:hover{color:var(--ink)}
+.pjabas>a[aria-current="page"]{color:var(--ink);border-bottom-color:var(--accent)}
+.pjabas>a.pjabas-voltar{color:var(--muted);font-weight:500;padding-left:0;margin-right:8px}
+.pjabas>a.pjabas-voltar svg{width:16px;height:16px}
+.pjabas .spacer{flex:1}
+.pjabas select{margin-bottom:6px}
+@media (max-width:760px){.pjabas{padding:2px 16px 0}.pjabas>a{padding:9px 10px}}
+.pjnovo{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;text-align:center;border:2px dashed var(--line);border-radius:14px;color:var(--muted);text-decoration:none;min-height:180px;font-weight:600}
+.pjnovo:hover{border-color:var(--accent);color:var(--ink)}
+.pjnovo b{font-size:2rem;line-height:1;color:var(--accent)}
+.pjextra{display:flex;flex-wrap:wrap;gap:6px;margin:-2px 0 2px}
+.pjextra span{font-size:.78rem;border:1px solid var(--line);border-radius:99px;padding:2px 8px;color:var(--muted)}
+.pjextra span.warn{color:var(--warn);border-color:currentColor}

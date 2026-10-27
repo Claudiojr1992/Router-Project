@@ -33,7 +33,7 @@
 <script>
 const msg = RP.$('#msg');
 const volta = new URLSearchParams(location.search).get('volta');
-const destino = (u) => (volta && volta.startsWith('/app/')) ? volta : (u.perfil === 'tecnico' ? '/m/' : u.perfil === 'admin' || (u.permissoes && u.permissoes.rota && u.permissoes.rota !== 'nenhum') ? '/app/rota.html' : '/app/minhas.html');
+const destino = (u) => (volta && volta.startsWith('/app/')) ? volta : (u.perfil === 'tecnico' ? '/m/' : u.perfil === 'admin' || ['rota', 'projetos', 'clientes'].some((m) => u.permissoes && u.permissoes[m] && u.permissoes[m] !== 'nenhum') ? '/app/projetos.html' : '/app/tarefas.html');
 RP.api('/auth/me').then((r) => { location.replace(destino(r.usuario)); }).catch(() => {});
 RP.$('#f').addEventListener('submit', (e) => {
   e.preventDefault();

@@ -56,27 +56,23 @@ const f = (id, label, val = '', extra = '') => `<div class="field"><label for="$
 const val = (el, id) => RP.$('#' + id, el).value;
 
 (async () => {
-  S = await Shell.init({ key: 'clientes', title: 'Clientes e contratos', sub: 'Clientes, contratos e os endereços de cada contrato', perfis: Shell.ESC });
+  S = await Shell.init({ key: 'clientes', title: 'Cadastro e endereços', sub: '', perfis: Shell.ESC });
   empresas = await RP.api('/empresas').catch(() => []);
   const qs = new URLSearchParams(location.search);
   const id = qs.get('id');
   if (['enderecos', 'contratos', 'dados'].includes(qs.get('aba'))) aba = qs.get('aba');
-  if (id) abrir(+id); else lista();
+  if (id) abrir(+id); else if (qs.get('novo')) novoProjeto(); else location.replace('/app/projetos.html');
 })();
 
-async function lista() {
-  history.replaceState(null, '', '/app/clientes.html');
-  cli = null;
-  S.sub.textContent = 'Clientes, contratos e os endereços de cada contrato';
-  S.actions.innerHTML = '<button class="btn sm primary" id="novo">+ Novo cliente</button>';
-  RP.$('#novo').onclick = novoCliente;
-  const cs = await RP.api('/clientes');
-  S.content.innerHTML = cs.length ? `<div class="grid2">${cs.map((c) => `<button class="card ccard" data-id="${c.id}">
-      <div class="row"><span class="avatar" style="border-radius:10px">${RP.esc(RP.iniciais(c.nome))}</span><div><h3>${RP.esc(c.nome)}</h3><div class="muted" style="font-size:.88rem">${RP.esc(c.razao_social || '')}</div></div></div>
-      <div class="row muted" style="font-size:.9rem"><span>${c.contratos} contrato(s)</span>·<span>${RP.fmtN(c.enderecos)} endereços</span>·<span>${RP.fmtN(c.cameras)} câmeras</span></div>
-      <div class="row"><div class="bar" style="flex:1"><i style="width:${c.enderecos ? Math.round(c.concluidos / c.enderecos * 100) : 0}%"></i></div><span class="muted" style="font-size:.85rem">${c.concluidos} concluídos</span></div>
-    </button>`).join('')}</div>` : '<div class="card empty">Nenhum cliente ainda. Use “+ Novo cliente”.</div>';
-  RP.$$('.ccard', S.content).forEach((b) => (b.onclick = () => abrir(+b.dataset.id)));
+// "+ Novo projeto" (tela Projetos): o formulário abre aqui, sobre uma tela de espera
+function novoProjeto() {
+  history.replaceState(null, '', '/app/clientes.html?novo=1');
+  RP.$('.top h1').textContent = 'Novo projeto'; document.title = 'Novo projeto · RoutProject';
+  S.sub.textContent = 'Cliente, contrato e itens num formulário só. Depois, a preparação do projeto mostra os próximos passos.';
+  S.content.innerHTML = `<div class="card empty"><p style="margin:0 0 12px">Preencha o formulário ao lado para criar o projeto.</p>
+    <div class="row" style="justify-content:center;gap:8px"><button class="btn primary" id="reabre">Abrir o formulário</button><a class="btn" href="/app/projetos.html">Voltar para Projetos</a></div></div>`;
+  RP.$('#reabre').onclick = novoCliente;
+  novoCliente();
 }
 
 async function carregarContrato() {
@@ -88,9 +84,9 @@ async function carregarContrato() {
 async function abrir(id) {
   cli = await RP.api('/clientes/' + id);
   history.replaceState(null, '', '/app/clientes.html?id=' + id);
-  S.sub.textContent = cli.razao_social || cli.nome;
-  S.actions.innerHTML = '<button class="btn sm" id="voltar">← Todos os clientes</button>';
-  RP.$('#voltar').onclick = lista;
+  Shell.projeto({ id: cli.id, nome: cli.nome, ativo: 'clientes' });
+  S.sub.textContent = 'Cadastro e endereços: contratos, endereços, equipes e datas';
+  S.actions.innerHTML = '';
   if (!contratoSel || !cli.contratos.some((c) => c.id === contratoSel)) contratoSel = cli.contratos[0]?.id || null;
   await carregarContrato();
   render();
@@ -100,8 +96,7 @@ function render() {
   const tot = cli.contratos.reduce((s, c) => s + c.enderecos, 0), cam = cli.contratos.reduce((s, c) => s + c.cameras, 0);
   S.content.innerHTML = `
     <div class="card"><div class="body row" style="gap:16px">
-      <span class="avatar" style="width:54px;height:54px;border-radius:12px;font-size:1.2rem">${RP.esc(RP.iniciais(cli.nome))}</span>
-      <div style="flex:1"><h2 style="font-size:1.6rem">${RP.esc(cli.nome)}</h2><div class="muted">${RP.esc(cli.cnpj || 'CNPJ não informado')} · ${RP.esc(cli.segmento || '')}</div></div>
+      <div style="flex:1"><div class="muted">${RP.esc(cli.razao_social || cli.nome)}</div><div class="muted" style="font-size:.9rem">${RP.esc(cli.cnpj || 'CNPJ não informado')}${cli.segmento ? ' · ' + RP.esc(cli.segmento) : ''} · ${cli.contratos.length} contrato(s)</div></div>
       <div class="kpi" style="min-width:130px"><span>Endereços</span><b>${RP.fmtN(tot)}</b></div><div class="kpi" style="min-width:130px"><span>Câmeras</span><b>${RP.fmtN(cam)}</b></div>
     </div>
     <div class="tabs" role="tablist">${[['enderecos', 'Endereços'], ['contratos', 'Contratos'], ['dados', 'Dados']].map(([k, v]) => `<button role="tab" aria-selected="${aba === k}" data-a="${k}">${v}</button>`).join('')}</div>
@@ -222,12 +217,11 @@ function passosPrep(abertos) {
 function guia(abertos) {
   if (!contratoSel) return '';
   const ps = passosPrep(abertos), feitos = ps.filter((p) => p.ok).length, prox = ps.find((p) => !p.ok);
-  const fim = `<a class="btn sm" href="/app/rota.html?c=${cli.id}">Painel de rotas e PDF</a><a class="btn sm" href="/app/projetos.html?id=${contratoSel}">Execução do projeto</a>`;
-  if (!prox) return `<div class="guia ok"><span class="guia-sel">✓</span><b>Projeto pronto para executar</b><span class="muted">Endereços, atividades, equipes e responsáveis definidos.</span><span class="spacer"></span>${fim}</div>`;
+  if (!prox) return `<div class="guia ok"><span class="guia-sel">✓</span><b>Projeto pronto para executar</b><span class="muted">Endereços, atividades, equipes e responsáveis definidos. Acompanhe pelas abas Painel e rotas e Execução.</span></div>`;
   return `<details class="guia" ${guiaAberto ? 'open' : ''}><summary><b>Preparação do projeto</b><span class="guia-prog"><i style="width:${feitos / ps.length * 100}%"></i></span><span class="muted">${feitos} de ${ps.length} prontos · próximo: <b style="color:var(--ink)">${prox.t}</b></span></summary>
     <ol class="guia-passos">${ps.map((p, i) => `<li class="${p.ok ? 'ok' : p === prox ? 'agora' : ''}"><div class="guia-h"><span class="guia-n">${p.ok ? '✓' : i + 1}</span><div class="guia-t"><b>${p.t}</b><small>${p.info}</small></div></div>
       <div class="guia-a">${p.acoes.map(([a, t, pri]) => a.startsWith('link:') ? `<a class="btn sm${pri && p === prox ? ' primary' : ''}" href="${a.slice(5)}">${t}</a>` : `<button type="button" class="btn sm${pri && p === prox ? ' primary' : ''}" data-guia="${a}">${t}</button>`).join('')}</div></li>`).join('')}</ol>
-    <div class="guia-fim"><span class="muted">Depois de pronto, acompanhe por aqui:</span>${fim}</div></details>`;
+    </details>`;
 }
 function ligarGuia(el) {
   const g = RP.$('details.guia', el);
@@ -779,12 +773,12 @@ function tabDados(el) {
 
 function novoCliente() {
   itensCt = [];
-  const d = RP.drawer('Novo cliente', `${dadosCampos({})}
+  const d = RP.drawer('Novo projeto', `${dadosCampos({})}
     <h3 style="font-size:1.15rem;margin:20px 0 4px">Contrato</h3><p class="muted" style="margin:0 0 12px;font-size:.9rem">Os endereços e as atividades ficam ligados a este contrato. Sem número, ele é criado como “Contrato principal” e você ajusta depois.</p>
     ${contratoCampos({})}
     <div class="field"><label for="k-pdf">PDF do contrato <span class="muted">(opcional, até 10 MB)</span></label><input class="input" id="k-pdf" type="file" accept="application/pdf"></div>
     ${blocoItens}${blocoPadrao}`, {
-    saveLabel: 'Criar cliente',
+    saveLabel: 'Criar projeto',
     onSave: async (el) => {
       const body = contratoBody(el);
       body.itens = lerItens(el);
@@ -797,7 +791,7 @@ function novoCliente() {
         const file = RP.$('#k-pdf', el).files[0];
         if (file) await enviarPdf(ct.id, file);
       }
-      RP.toast('Cliente criado'); aba = 'enderecos'; abrir(c.id);
+      RP.toast('Projeto criado'); aba = 'enderecos'; abrir(c.id);
     },
   });
   editorItens(d.el, [{ nome: 'Câmera' }, { nome: 'Servidor / NVR' }, { nome: 'Switch PoE' }], false);

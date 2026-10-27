@@ -28,99 +28,23 @@ const ICO = {
 };
 
 (async () => {
-  S = await Shell.init({ key: 'rota', title: 'Painel de rotas', sub: 'Resumo dos projetos: meta de instalações, avanço e atenção. Clique num projeto para abrir a estratégia e as rotas.', perfis: Shell.ESC });
+  S = await Shell.init({ key: 'rota', title: 'Painel de rotas', sub: 'Estratégia, rotas por equipe, regras e PDF para o cliente', perfis: Shell.ESC });
   projetos = await RP.api('/rota/clientes');
-  if (!projetos.length) { S.content.innerHTML = '<div class="card empty">Cadastre um cliente em Clientes para montar a rota.</div>'; return; }
+  // a lista de projetos agora é uma só (tela Projetos); aqui abre sempre um projeto
   const qs = +new URLSearchParams(location.search).get('c');
-  if (qs && projetos.some((p) => p.id === qs)) abrir(qs); else visao();
+  if (qs && projetos.some((p) => p.id === qs)) abrir(qs); else location.replace('/app/projetos.html');
 })();
-
-function visao() {
-  atual = null;
-  history.replaceState(null, '', '/app/rota.html');
-  S.content.style.padding = '';
-  S.actions.innerHTML = '';
-  const T = projetos.reduce((a, p) => ({ u: a.u + p.enderecos, c: a.c + p.concluidos, m: a.m + metaDe(p), at: a.at + p.atencao, ex: a.ex + p.em_execucao }), { u: 0, c: 0, m: 0, at: 0, ex: 0 });
-  const g = T.m ? Math.min(100, Math.round((T.c / T.m) * 100)) : 0;
-  const n = { todos: projetos.length, atencao: 0, execucao: 0, concluido: 0 };
-  projetos.forEach((p) => n[situacao(p)]++);
-  S.content.innerHTML = `
-    <section class="pjhero card">
-      <div class="pjring" style="--p:${g}"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="50"/><circle cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="${g} 100"/></svg><div><b>${g}%</b><span>instalado</span></div></div>
-      <div class="pjhero-t"><h2>Avanço geral das instalações</h2><p class="muted">${RP.fmtN(T.c)} de ${RP.fmtN(T.m)} endereços da meta concluídos em ${projetos.length} projeto(s)</p>
-        <div class="pjbar lg"><i style="width:${g}%"></i></div></div>
-      <div class="pjhero-k">
-        <div><span>Unidades na rota</span><b>${RP.fmtN(T.u)}</b></div>
-        <div><span>Concluídas</span><b style="color:var(--ok)">${RP.fmtN(T.c)}</b></div>
-        <div><span>Em execução</span><b style="color:var(--info)">${RP.fmtN(T.ex)}</b></div>
-        <div><span>Atenção</span><b style="color:${T.at ? 'var(--err)' : 'inherit'}">${RP.fmtN(T.at)}</b></div>
-      </div>
-    </section>
-    <div class="pjtools">
-      <input class="input" id="pj-q" type="search" placeholder="Buscar projeto" value="${RP.esc(busca)}" aria-label="Buscar projeto">
-      <div class="vtabs" role="tablist" aria-label="Filtrar projetos" style="margin:0">${[['todos', 'Todos'], ['atencao', 'Com atenção'], ['execucao', 'Em execução'], ['concluido', 'Concluídos']]
-        .map(([k, t]) => `<button type="button" role="tab" class="eqc" data-f="${k}" aria-pressed="${filtro === k}">${t} <small>${n[k]}</small></button>`).join('')}</div>
-    </div>
-    <div class="pjgrid" id="pj-grid"></div>`;
-  const q$ = RP.$('#pj-q');
-  q$.oninput = () => { busca = q$.value; cards(); };
-  RP.$$('[data-f]').forEach((b) => (b.onclick = () => { filtro = b.dataset.f; RP.$$('[data-f]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); cards(); }));
-  cards();
-}
-
-function cards() {
-  const lq = busca.trim().toLowerCase();
-  const lista = projetos.filter((p) => (filtro === 'todos' || situacao(p) === filtro) && (!lq || p.nome.toLowerCase().includes(lq)));
-  const el = RP.$('#pj-grid');
-  if (!lista.length) { el.innerHTML = '<div class="card empty" style="grid-column:1/-1">Nenhum projeto neste filtro.</div>'; return; }
-  el.innerHTML = lista.map((p) => {
-    const st = situacao(p), m = metaDe(p), falta = Math.max(0, m - p.concluidos), pc = pct(p);
-    return `<article class="pjcard" data-p="${p.id}" tabindex="0" role="button" aria-label="Abrir projeto ${RP.esc(p.nome)}">
-      <div class="pjtop"><span class="pjbadge" style="--c:${SIT[st][1]}"><i></i>${SIT[st][0]}</span>${p.fora_rota ? `<span class="pjfora" title="Endereços marcados como fora da rota">${p.fora_rota} fora da rota</span>` : ''}</div>
-      <h3>${RP.esc(p.nome)}</h3>
-      <p class="pjdate">Criado em ${RP.fmtData(p.criado_em)}${p.fim_previsto ? ` · término previsto ${RP.fmtData(p.fim_previsto)}` : ''}</p>
-      <div class="pjmeta">
-        <div><span>Meta de instalações</span><b>${RP.fmtN(p.concluidos)} <small>/ ${RP.fmtN(m)}</small></b><small class="${falta ? '' : 'ok'}">${falta ? `${RP.fmtN(falta)} para concluir` : 'Meta atingida'}</small></div>
-        <button type="button" class="pjedit" data-meta="${p.id}" title="Editar a meta de instalações" aria-label="Editar a meta de ${RP.esc(p.nome)}">${ICO.ed}</button>
-      </div>
-      <div class="pjprog"><div class="pjprog-h"><span>Avanço da meta</span><b>${pc}%</b></div><div class="pjbar" style="--c:${SIT[st][1]}"><i style="width:${pc}%"></i></div></div>
-      <div class="pjtiles">
-        <div><span class="ic">${ICO.un}</span><b>${RP.fmtN(p.enderecos)}</b><small>Unidades</small></div>
-        <div><span class="ic ok">${ICO.ok}</span><b>${RP.fmtN(p.concluidos)}</b><small>Concluídas</small></div>
-        <div class="${p.atencao ? 'hot' : ''}"><span class="ic at">${ICO.at}</span><b>${RP.fmtN(p.atencao)}</b><small>Atenção</small></div>
-      </div>
-      <p class="pjopen">Clique para abrir projeto →</p>
-    </article>`;
-  }).join('');
-  RP.$$('.pjcard', el).forEach((c) => {
-    c.onclick = () => abrir(+c.dataset.p);
-    c.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(+c.dataset.p); } };
-  });
-  RP.$$('[data-meta]', el).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); editarMeta(projetos.find((p) => p.id === +b.dataset.meta)); }));
-}
-
-function editarMeta(p) {
-  RP.drawer(`Meta de instalações · ${p.nome}`, `
-    <p class="muted" style="margin-top:0">Quantos endereços este projeto precisa instalar. Deixe em branco para usar todos os endereços na rota (${RP.fmtN(p.enderecos)}).</p>
-    <div class="field"><label for="mt-v">Meta (endereços)</label><input class="input" id="mt-v" type="number" min="1" inputmode="numeric" value="${p.meta_instalacoes || ''}" placeholder="${p.enderecos}"></div>
-    <p class="muted" style="font-size:.88rem">Concluídos hoje: <b style="color:var(--ink)">${RP.fmtN(p.concluidos)}</b>. Endereços fora da rota não contam (marque em Clientes → Endereços).</p>`, {
-    onSave: async (el) => {
-      await RP.api(`/rota/${p.id}/meta`, { method: 'PUT', body: { meta: RP.$('#mt-v', el).value } });
-      RP.toast('Meta atualizada'); projetos = await RP.api('/rota/clientes'); visao();
-    },
-  });
-}
 
 async function abrir(id) {
   atual = projetos.find((p) => p.id === id);
   lembrar(id);
   history.replaceState(null, '', '/app/rota.html?c=' + id);
   const gestor = Shell.pode('rota', 'editar');
-  S.actions.innerHTML = `<button class="btn sm" id="voltar">← Todos os projetos</button><a class="btn sm" href="/app/rota/${id}" target="_blank" rel="noopener">Abrir em tela cheia</a>`;
-  RP.$('#voltar').onclick = visao;
+  Shell.projeto({ id, nome: atual.nome, ativo: 'rota' });
+  S.actions.innerHTML = `<a class="btn sm" href="/app/rota/${id}" target="_blank" rel="noopener">Abrir em tela cheia</a>`;
   S.content.style.padding = '0';
   const st = situacao(atual), pc = pct(atual);
-  S.sub.textContent = `${atual.nome} · estratégia, rotas por equipe, regras e PDF para o cliente`;
+  S.sub.textContent = 'Painel e rotas: estratégia, rotas por equipe, regras e PDF para o cliente';
   S.content.innerHTML = `
     <div style="padding:0 24px 12px">
       <div class="card rvbar">
@@ -143,7 +67,7 @@ async function abrir(id) {
     const partes = [chip(`${RP.fmtN(r.unidades)} na rota · ${r.estatico ? 'distâncias de estrada da planilha' : 'distâncias pelas coordenadas'}`, 'var(--accent)')];
     if (r.pelo_endereco) partes.push(chip(`${r.pelo_endereco} no endereço exato`, 'var(--ok)'));
     if (r.aproximados) partes.push(chip(`${r.aproximados} pelo centro do município`, 'var(--warn)') + (r.geocoder ? '<button class="btn sm" id="geo" title="Busca a posição pelo logradouro, município e CEP">Localizar pelo endereço</button>' : ''));
-    if (r.fora_rota) partes.push(`<a class="rvchip" style="--c:var(--muted)" href="/app/clientes.html?id=${id}" title="Marque em Clientes → Endereços"><i></i>${r.fora_rota} fora da rota (por escolha)</a>`);
+    if (r.fora_rota) partes.push(`<a class="rvchip" style="--c:var(--muted)" href="/app/clientes.html?id=${id}" title="Marque em Cadastro e endereços"><i></i>${r.fora_rota} fora da rota (por escolha)</a>`);
     if (r.sem_localizacao.length) partes.push(chip(`${r.sem_localizacao.length} sem localização: município não reconhecido`, 'var(--err)', `title="${RP.esc(r.sem_localizacao.map((x) => `${x.nome} (${x.municipio}/${x.uf})`).join('\n'))}"`));
     RP.$('#info').innerHTML = partes.join('');
     RP.$('#base')?.addEventListener('click', () => trocarBase(id, r.base));

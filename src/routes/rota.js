@@ -227,6 +227,28 @@ module.exports = (app) => {
        LEFT JOIN enderecos e ON e.contrato_id = ct.id
       WHERE c.ativo GROUP BY c.id ORDER BY count(e.id) DESC, c.nome`, [PRE_EXEC]));
 
+  // Lista única de projetos (tela Projetos): um card por cliente, com contratos e pendências de responsável.
+  // Liberada para quem vê o Painel de rotas, a Execução ou o Cadastro (tabela de permissões).
+  app.get('/api/carteira', requer(), async () => db.many(
+    `SELECT c.id, c.nome, c.criado_em, c.meta_instalacoes, c.equipes,
+            count(e.id) FILTER (WHERE e.na_rota)::int AS enderecos,
+            count(e.id)::int AS enderecos_total,
+            count(e.id) FILTER (WHERE NOT e.na_rota)::int AS fora_rota,
+            COALESCE(sum(e.cameras) FILTER (WHERE e.na_rota),0)::int AS cameras,
+            count(e.id) FILTER (WHERE e.na_rota AND ${CONCL})::int AS concluidos,
+            count(e.id) FILTER (WHERE e.na_rota AND NOT ${CONCL} AND e.status <> ALL($1))::int AS em_execucao,
+            count(e.id) FILTER (WHERE e.na_rota AND NOT ${CONCL} AND (
+              (e.inicio_previsto < CURRENT_DATE AND e.status = ANY($1)) OR e.fim_previsto < CURRENT_DATE))::int AS atencao,
+            max(COALESCE(e.fim_previsto, e.inicio_previsto)) FILTER (WHERE e.na_rota AND NOT ${CONCL}) AS fim_previsto,
+            (SELECT COALESCE(json_agg(json_build_object('id', x.id, 'numero', x.numero, 'tipo', x.tipo) ORDER BY x.tipo DESC, x.id), '[]')
+               FROM contratos x WHERE x.cliente_id = c.id AND x.status <> 'encerrado') AS contratos,
+            (SELECT count(*)::int FROM tarefas t JOIN enderecos e2 ON e2.id = t.endereco_id JOIN contratos x ON x.id = e2.contrato_id
+              WHERE x.cliente_id = c.id AND x.status <> 'encerrado' AND t.responsavel_id IS NULL AND t.status <> 'concluida') AS sem_responsavel
+       FROM clientes c
+       LEFT JOIN contratos ct ON ct.cliente_id = c.id AND ct.status <> 'encerrado'
+       LEFT JOIN enderecos e ON e.contrato_id = ct.id
+      WHERE c.ativo GROUP BY c.id ORDER BY count(e.id) DESC, c.nome`, [PRE_EXEC]));
+
   // Meta de instalações do projeto (vazio = todos os endereços na rota)
   app.put('/api/rota/:cliente/meta', escritorio, async (req) => {
     const id = v.id(req.params.cliente, 'Cliente');

@@ -33,18 +33,18 @@ const Shell = (() => {
   // reabrir atividade concluída
   const REABRE = ['admin', 'coordenador', 'supervisor'];
   // cada item aparece para quem pode ao menos ver o módulo (tela Permissões)
+  // grupo: telas que viraram abas de outra (não aparecem no menu e abrem na mesma aba do topo)
   const MENU = [
     { grp: 'Operação' },
-    { key: 'rota', href: '/app/rota.html', label: 'Painel de rotas', icon: 'rota', mod: 'rota' },
-    { key: 'projetos', href: '/app/projetos.html', label: 'Projetos', icon: 'proj', mod: 'projetos' },
-    { key: 'minhas', href: '/app/minhas.html', label: 'Minhas atividades', icon: 'minhas', mod: 'minhas' },
-    { key: 'delegadas', href: '/app/delegadas.html', label: 'Delegadas', icon: 'del', mod: 'delegadas' },
+    { key: 'projetos', href: '/app/projetos.html', label: 'Projetos', icon: 'proj', mod: ['projetos', 'rota', 'clientes'] },
+    { key: 'rota', href: '/app/rota.html', label: 'Painel de rotas', icon: 'rota', mod: 'rota', grupo: 'projetos' },
+    { key: 'clientes', href: '/app/clientes.html', label: 'Cadastro e endereços', icon: 'cli', mod: 'clientes', grupo: 'projetos' },
+    { key: 'tarefas', href: '/app/tarefas.html', label: 'Tarefas', icon: 'minhas', mod: ['minhas', 'delegadas'] },
     { key: 'faturamento', href: '/app/faturamento.html', label: 'Faturamento', icon: 'fat', mod: 'faturamento' },
     { key: 'chat', href: '/app/chat.html', label: 'Chat', icon: 'chat', mod: 'chat' },
     { key: 'app', href: '/m/', label: 'App do técnico', icon: 'cel', mod: 'app' },
-    // na ordem em que um projeto novo é preparado
+    // na ordem em que um projeto novo é preparado (clientes e contratos nascem em Projetos → + Novo projeto)
     { grp: 'Preparar projeto' },
-    { key: 'clientes', href: '/app/clientes.html', label: 'Clientes e contratos', icon: 'cli', mod: 'clientes' },
     { key: 'atividades', href: '/app/atividades.html', label: 'Atividades', icon: 'ativ', mod: 'atividades' },
     { key: 'checklists', href: '/app/checklists.html', label: 'Checklists', icon: 'check', mod: 'checklists' },
     { key: 'equipe', href: '/app/equipe.html', label: 'Técnicos e times', icon: 'eq', mod: 'equipe' },
@@ -58,7 +58,7 @@ const Shell = (() => {
   const NIV = { nenhum: 0, ver: 1, editar: 2 };
   let eu = null;
   // pode('clientes') = pode ver; pode('clientes', 'editar') = pode alterar
-  const pode = (mod, nivel = 'ver') => !!eu && (eu.perfil === 'admin' || (NIV[(eu.permissoes || {})[mod]] || 0) >= NIV[nivel]);
+  const pode = (mod, nivel = 'ver') => !!eu && (Array.isArray(mod) ? mod.some((m) => pode(m, nivel)) : (eu.perfil === 'admin' || (NIV[(eu.permissoes || {})[mod]] || 0) >= NIV[nivel]));
   const acao = (a) => !!eu && (eu.perfil === 'admin' || !!(eu.acoes || {})[a]);
   const PERFIL = { admin: 'Administrador', coordenador: 'Coordenação', supervisor: 'Supervisão', administrativo: 'Administrativo', tecnico: 'Técnico', cliente: 'Cliente' };
 
@@ -76,13 +76,14 @@ const Shell = (() => {
       </div></div>`;
     document.title = `${title} · RoutProject`;
 
+    const chave = (MENU.find((m) => m.key === key) || {}).grupo || key; // item do menu e aba do topo
     let user;
     try { user = (await RP.api('/auth/me')).usuario; } catch (_) { return new Promise(() => {}); }
     eu = user;
     const side = RP.$('#side');
-    side.innerHTML = '<div class="sidetop">' + RP.logo('/app/') + `<button type="button" class="minibtn" id="minibtn" title="Encolher o menu" aria-label="Encolher o menu" aria-pressed="false">${svg('mini')}</button></div>` + '<nav aria-label="Menu principal">' + MENU.filter((m) => m.grp || pode(m.mod))
+    side.innerHTML = '<div class="sidetop">' + RP.logo('/app/') + `<button type="button" class="minibtn" id="minibtn" title="Encolher o menu" aria-label="Encolher o menu" aria-pressed="false">${svg('mini')}</button></div>` + '<nav aria-label="Menu principal">' + MENU.filter((m) => m.grp || (!m.grupo && pode(m.mod)))
       .map((m) => (m.grp ? `<div class="grp">${m.grp}</div>` :
-        `<a class="nav" href="${m.href}" title="${m.label}" ${m.key === key ? 'aria-current="page"' : ''}>${svg(m.icon)}<span>${m.label}</span>${m.soon ? '<span class="soon">em breve</span>' : ''}</a>`))
+        `<a class="nav" href="${m.href}" title="${m.label}" ${m.key === chave ? 'aria-current="page"' : ''}>${svg(m.icon)}<span>${m.label}</span>${m.soon ? '<span class="soon">em breve</span>' : ''}</a>`))
       .join('').replace(/(<div class="grp">[^<]+<\/div>)(?=<div class="grp">|$)/g, '') + '</nav>' +
       `<div class="me"><button type="button" class="mebtn" id="mebtn" aria-haspopup="menu" aria-expanded="false"><span class="avatar">${RP.esc(RP.iniciais(user.nome))}</span><span class="who"><b>${RP.esc(user.nome)}</b><span>${RP.esc(user.perfil_nome || PERFIL[user.perfil] || user.perfil)}</span></span>
          <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
@@ -106,7 +107,7 @@ const Shell = (() => {
     let miniIni = false; try { miniIni = localStorage.getItem('rp-side-mini') === '1'; } catch (_) { /* sem armazenamento */ }
     setMini(miniIni);
     mini.onclick = () => setMini(!app.classList.contains('mini'));
-    abas(key, title);
+    abas(chave, title);
     RP.$('.burger')?.addEventListener('click', () => app.classList.toggle('open'));
     app.addEventListener('click', (e) => { if (app.classList.contains('open') && !e.target.closest('.side') && !e.target.closest('.burger')) app.classList.remove('open'); });
 
@@ -120,7 +121,9 @@ const Shell = (() => {
 
   // ---------- Abas das telas abertas (ficam salvas neste navegador) e voltar ----------
   function abas(key, title) {
-    const ler = () => { try { return JSON.parse(localStorage.getItem('rp-abas') || '[]').filter((x) => x && x.k && x.u); } catch (_) { return []; } };
+    // abas antigas de telas que viraram parte de outra (Painel de rotas, Clientes, Minhas, Delegadas) somem sozinhas
+    const velha = (k) => ['minhas', 'delegadas'].includes(k) || !!(MENU.find((m) => m.key === k) || {}).grupo;
+    const ler = () => { try { return JSON.parse(localStorage.getItem('rp-abas') || '[]').filter((x) => x && x.k && x.u && !velha(x.k)); } catch (_) { return []; } };
     const gravar = (l) => { try { localStorage.setItem('rp-abas', JSON.stringify(l)); } catch (_) { /* sem armazenamento */ } };
     const m = MENU.find((x) => x.key === key);
     let l = ler();
@@ -141,7 +144,7 @@ const Shell = (() => {
         e.preventDefault();
         const a = ler(); const ix = a.findIndex((x) => x.k === b.dataset.fechar); if (ix < 0) return;
         a.splice(ix, 1); gravar(a);
-        if (b.dataset.fechar === key) { const prox = a[ix] || a[ix - 1]; location.href = prox ? prox.u : '/app/rota.html'; } else desenhar();
+        if (b.dataset.fechar === key) { const prox = a[ix] || a[ix - 1]; location.href = prox ? prox.u : '/app/'; } else desenhar();
       }));
     };
     desenhar();
@@ -151,6 +154,23 @@ const Shell = (() => {
       vb.hidden = false; vb.title = ant ? 'Voltar para ' + ant.t : 'Voltar';
       vb.onclick = () => { if (ant) location.href = ant.u; else history.back(); };
     }
+  }
+
+  // ---------- Abas de um projeto (Painel e rotas · Execução · Cadastro e endereços) ----------
+  // Fica logo abaixo do título; o mesmo cliente nas três telas, sem voltar para a lista.
+  function projeto({ id, nome, ativo, extra = '' }) {
+    const tabs = [
+      ['rota', 'Painel e rotas', `/app/rota.html?c=${id}`, 'Plano por equipe, mapa, meta e PDF para o cliente'],
+      ['projetos', 'Execução', `/app/projetos.html?cliente=${id}`, 'Atividades de cada endereço, responsáveis e monitoramento'],
+      ['clientes', 'Cadastro e endereços', `/app/clientes.html?id=${id}`, 'Endereços, contratos, equipes e datas'],
+    ].filter(([m]) => pode(m));
+    const h1 = RP.$('.top h1'); if (h1) h1.textContent = nome;
+    document.title = `${nome} · RoutProject`;
+    let nav = RP.$('#pjabas');
+    if (!nav) { nav = document.createElement('nav'); nav.id = 'pjabas'; nav.className = 'pjabas'; nav.setAttribute('aria-label', 'Partes do projeto'); RP.$('#content').before(nav); }
+    nav.innerHTML = `<a class="pjabas-voltar" href="/app/projetos.html" title="Todos os projetos">${svg('voltar')}<span>Projetos</span></a>`
+      + tabs.map(([m, t, u, d]) => `<a href="${u}" title="${d}" ${m === ativo ? 'aria-current="page"' : ''}>${t}</a>`).join('') + `<span class="spacer"></span>${extra}`;
+    return nav;
   }
 
   // ---------- Tema e meus dados ----------
@@ -184,5 +204,5 @@ const Shell = (() => {
     });
   }
 
-  return { init, pode, acao, PERFIL, ESC, GES, TODOS, REABRE, aplicarTema, temaAtual };
+  return { init, pode, acao, projeto, PERFIL, ESC, GES, TODOS, REABRE, aplicarTema, temaAtual };
 })();

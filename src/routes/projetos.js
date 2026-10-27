@@ -175,8 +175,9 @@ module.exports = (app) => {
   app.get('/api/minhas-tarefas', leitura, async (req) => {
     if (!req.user.pessoa_id) return [];
     return db.many(
-      `SELECT t.id, t.status, t.prevista_inicio, t.prevista_fim, a.nome AS atividade, a.checklist_id,
-              e.nome AS endereco, e.municipio, e.uf, e.cameras, cl.nome AS cliente
+      `SELECT t.id, t.status, t.prevista_inicio, t.prevista_fim, t.atualizado_em, a.nome AS atividade, a.checklist_id, a.evidencia,
+              e.id AS endereco_id, e.nome AS endereco, e.municipio, e.uf, e.cameras, e.status AS endereco_status,
+              ct.numero AS contrato, cl.nome AS cliente
          FROM tarefas t JOIN atividades a ON a.id = t.atividade_id AND a.ativo
          JOIN enderecos e ON e.id = t.endereco_id JOIN contratos ct ON ct.id = e.contrato_id JOIN clientes cl ON cl.id = ct.cliente_id
         WHERE t.responsavel_id = $1 ORDER BY t.status = 'concluida', t.prevista_inicio NULLS LAST, e.nome LIMIT 500`, [req.user.pessoa_id]);

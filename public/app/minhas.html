@@ -1,53 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Minhas atividades · RoutProject</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
-<link rel="stylesheet" href="/css/app.css">
-<script src="/js/api.js"></script>
-<script src="/js/shell.js"></script>
-</head>
-<body>
-<script>
-const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
-const PROX = { a_fazer: ['em_andamento', 'Iniciar'], em_andamento: ['concluida', 'Concluir'], aguardando: ['em_andamento', 'Retomar'] };
-let S, itens = [], aba = 'abertas';
-
-(async () => {
-  S = await Shell.init({ key: 'minhas', title: 'Minhas atividades', sub: 'O que está com você em cada endereço' });
-  if (S.user.perfil === 'cliente') { S.content.innerHTML = '<div class="card empty">O acesso de cliente ainda está em preparação.</div>'; return; }
-  carregar();
-})();
-
-async function carregar() { itens = await RP.api('/minhas-tarefas'); render(); }
-
-function render() {
-  const ab = itens.filter((t) => t.status !== 'concluida');
-  const vis = aba === 'abertas' ? ab : itens.filter((t) => t.status === 'concluida');
-  S.content.innerHTML = `
-    <div class="alert info" style="margin:0">No celular, use o <a href="/m/"><b>App do técnico</b></a>: checklist, fotos e funcionamento sem internet.</div>
-    <div class="card">
-      <div class="tabs" role="tablist">
-        <button role="tab" aria-selected="${aba === 'abertas'}" data-a="abertas">Em aberto (${ab.length})</button>
-        <button role="tab" aria-selected="${aba === 'feitas'}" data-a="feitas">Concluídas (${itens.length - ab.length})</button>
-      </div>
-      ${vis.length ? `<div>${vis.map((t) => `<div class="row" style="padding:14px 16px;border-bottom:1px solid var(--line);align-items:flex-start">
-          <div style="flex:1;min-width:200px"><b>${RP.esc(t.atividade)}</b><div class="muted" style="font-size:.9rem">${RP.esc(t.endereco)} · ${RP.esc(t.municipio)}/${t.uf} · ${t.cameras} câmeras</div>
-            <div class="muted" style="font-size:.85rem">${RP.esc(t.cliente)}${t.prevista_inicio ? ' · previsto ' + RP.fmtData(t.prevista_inicio) : ''}</div></div>
-          <span class="pill ${t.status}"><i></i>${ST[t.status]}</span>
-          ${PROX[t.status] ? `<button class="btn sm primary" data-id="${t.id}" data-s="${PROX[t.status][0]}">${PROX[t.status][1]}</button>` : ''}
-          ${t.status === 'em_andamento' ? `<button class="btn sm" data-id="${t.id}" data-s="aguardando">Pausar</button>` : ''}
-        </div>`).join('')}</div>` : `<div class="empty">${aba === 'abertas' ? 'Nenhuma atividade com você agora.' : 'Nada concluído ainda.'}</div>`}
-    </div>`;
-  RP.$$('[data-a]', S.content).forEach((b) => (b.onclick = () => { aba = b.dataset.a; render(); }));
-  RP.$$('[data-s]', S.content).forEach((b) => (b.onclick = () => RP.busy(b, async () => {
-    try { await RP.api('/tarefas/' + b.dataset.id, { method: 'PATCH', body: { status: b.dataset.s } }); RP.toast('Status atualizado'); await carregar(); }
-    catch (e) { RP.toast(e.message); }
-  })));
-}
-</script>
-</body>
-</html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Minhas atividades · RoutProject</title>
+<script>location.replace('/app/tarefas.html');</script>
+<meta http-equiv="refresh" content="0;url=/app/tarefas.html"></head>
+<body><p>Esta tela agora faz parte de <a href="/app/tarefas.html">Tarefas</a>.</p></body></html>

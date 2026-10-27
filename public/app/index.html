@@ -9,7 +9,8 @@
 <body>
 <script>
 RP.api('/auth/me')
-  .then((r) => location.replace(r.usuario.perfil !== 'admin' && (!r.usuario.permissoes || !r.usuario.permissoes.rota || r.usuario.permissoes.rota === 'nenhum') ? '/app/minhas.html' : '/app/rota.html'))
+  .then((r) => { const u = r.usuario, p = u.permissoes || {}; const ve = (m) => p[m] && p[m] !== 'nenhum';
+    location.replace(u.perfil === 'admin' || ve('rota') || ve('projetos') || ve('clientes') ? '/app/projetos.html' : '/app/tarefas.html'); })
   .catch(() => location.replace('/'));
 </script>
 </body>

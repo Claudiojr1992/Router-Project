@@ -3,14 +3,14 @@
 const db = require('./db');
 
 const MODULOS = [
-  { id: 'rota', nome: 'Painel de rotas', grupo: 'Operação', desc: 'Resumo dos projetos, plano de rotas, regras e PDF' },
-  { id: 'projetos', nome: 'Projetos', grupo: 'Operação', desc: 'Matriz endereço × atividade, relatórios, assinatura e monitoramento' },
-  { id: 'delegadas', nome: 'Delegadas', grupo: 'Operação', desc: 'Atividades enviadas para coordenação e administrativo' },
-  { id: 'minhas', nome: 'Minhas atividades', grupo: 'Operação', desc: 'As atividades da própria pessoa (iniciar, pausar, concluir)' },
+  { id: 'rota', nome: 'Projetos · Painel e rotas', grupo: 'Operação', desc: 'Plano de rotas por equipe, mapa, meta, regras e PDF' },
+  { id: 'projetos', nome: 'Projetos · Execução', grupo: 'Operação', desc: 'Matriz endereço × atividade, responsáveis, relatórios, assinatura e monitoramento' },
+  { id: 'delegadas', nome: 'Tarefas · Delegadas ao escritório', grupo: 'Operação', desc: 'Tarefas enviadas para coordenação e administrativo' },
+  { id: 'minhas', nome: 'Tarefas · Comigo', grupo: 'Operação', desc: 'As tarefas da própria pessoa (iniciar, pausar, concluir)' },
   { id: 'app', nome: 'App do técnico', grupo: 'Operação', desc: 'Uso do app no celular, com e sem internet' },
   { id: 'faturamento', nome: 'Faturamento', grupo: 'Operação', desc: 'Medições, nota fiscal e recebimento' },
   { id: 'chat', nome: 'Chat', grupo: 'Operação', desc: 'Conversas, pedidos e ocorrências' },
-  { id: 'clientes', nome: 'Clientes e endereços', grupo: 'Cadastros', desc: 'Clientes, contratos, endereços, etapas e equipes' },
+  { id: 'clientes', nome: 'Projetos · Cadastro e endereços', grupo: 'Cadastros', desc: 'Criar projetos; clientes, contratos, endereços, etapas e equipes' },
   { id: 'empresas', nome: 'Empresas', grupo: 'Cadastros', desc: 'Empresas executoras e parceiras' },
   { id: 'atividades', nome: 'Atividades', grupo: 'Cadastros', desc: 'Atividades de cada contrato e tempos' },
   { id: 'checklists', nome: 'Checklists', grupo: 'Cadastros', desc: 'Checklists e modelo do relatório' },
@@ -102,6 +102,7 @@ const ROTAS = [
   ['GET', P('/api/tarefas/[^/]+/(evidencias\\.zip|assinatura)'), 'projetos:ver'],
   ['POST', P('/api/tarefas/[^/]+/assinatura'), 'projetos:editar'],
   ['*', P('/api/(tarefas|fotos)(/.*)?'), { any: ['minhas', 'projetos', 'delegadas', 'app'] }],
+  ['GET', P('/api/carteira'), { any: ['rota:ver', 'projetos:ver', 'clientes:ver'] }],
   ['*', P('/api/rota(/.*)?'), 'rota'],
 ];
 

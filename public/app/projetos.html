@@ -19,38 +19,147 @@ const TIPO = { tecnico: ['Técnico', 'tec'], coordenacao: ['Coordenação', 'coo
 let mon = new Map();
 let S, user, pessoas = [], proj = null, filtro = { q: '', uf: '', resp: '', et: '' };
 
+// Situação do card: concluído quando atinge a meta; atenção quando há endereço atrasado; senão em execução
+const metaDe = (p) => p.meta_instalacoes || p.enderecos;
+const situacao = (p) => (!p.enderecos_total ? 'preparo' : p.enderecos && p.concluidos >= metaDe(p) ? 'concluido' : p.atencao ? 'atencao' : 'execucao');
+const SIT = { preparo: ['Em preparação', 'var(--muted)'], atencao: ['Requer atenção', 'var(--err)'], execucao: ['Em execução', 'var(--info)'], concluido: ['Concluído', 'var(--ok)'] };
+const pctP = (p) => { const m = metaDe(p); return m ? Math.min(100, Math.round((p.concluidos / m) * 100)) : 0; };
+const ICO = {
+  un: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/></svg>',
+  ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>',
+  at: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17.5v.5"/></svg>',
+  ed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
+};
+let carteira = [], filtroL = 'todos', busca = '';
+const lembrarCt = (cli, ct) => { try { localStorage.setItem('rp-ct-' + cli, String(ct)); } catch (_) { /* sem armazenamento */ } };
+const ultimoCt = (cli) => { try { return +localStorage.getItem('rp-ct-' + cli) || null; } catch (_) { return null; } };
+
 (async () => {
-  S = await Shell.init({ key: 'projetos', title: 'Projetos', sub: 'Cada contrato é um projeto: endereços e as atividades de cada um', perfis: Shell.ESC });
+  S = await Shell.init({ key: 'projetos', title: 'Projetos', sub: 'Todos os projetos: avanço, atenção e o que falta preparar', perfis: Shell.ESC });
   user = S.user;
-  pessoas = await RP.api('/pessoas');
-  const id = new URLSearchParams(location.search).get('id');
-  if (id) { await abrir(+id); if (new URLSearchParams(location.search).get('acao') === 'distribuir' && Shell.acao('distribuir')) distribuir(); } else lista();
+  const qs = new URLSearchParams(location.search);
+  const id = +qs.get('id'), cli = +qs.get('cliente');
+  if (cli && !id) { await abrirCliente(cli); return; }
+  if (id) { await abrir(id); if (qs.get('acao') === 'distribuir' && Shell.acao('distribuir')) distribuir(); } else lista();
 })();
 
+// ---------- Lista única de projetos (um card por cliente) ----------
 async function lista() {
   history.replaceState(null, '', '/app/projetos.html');
-  S.sub.textContent = 'Cada contrato é um projeto: endereços e as atividades de cada um';
-  S.actions.innerHTML = '';
-  const ps = await RP.api('/projetos');
-  if (!ps.length) { S.content.innerHTML = '<div class="card empty">Nenhum projeto ainda. Cadastre um cliente e um contrato em Clientes.</div>'; return; }
-  S.content.innerHTML = `<div class="grid2">${ps.map((p) => {
-    const pct = p.tarefas ? Math.round(p.concluidas / p.tarefas * 100) : 0;
-    return `<button class="card ccard" data-id="${p.id}">
-      <div class="row"><span class="pill">${RP.esc(p.cliente)}</span><span class="pill">${p.tipo === 'aditivo' ? 'Aditivo' : 'Contrato principal'}</span></div>
-      <h3>${RP.esc(p.numero)}</h3><div class="muted">${RP.esc(p.objeto || '')}</div>
-      <div class="row muted" style="font-size:.9rem"><span>${RP.fmtN(p.enderecos)} endereços</span>·<span>${RP.fmtN(p.cameras)} câmeras</span>·<span>${RP.fmtN(p.sem_responsavel)} sem responsável</span></div>
-      <div class="row"><div class="bar" style="flex:1"><i style="width:${pct}%"></i></div><b>${pct}%</b></div></button>`;
-  }).join('')}</div>`;
-  RP.$$('.ccard', S.content).forEach((b) => (b.onclick = () => abrir(+b.dataset.id)));
+  RP.$('#pjabas')?.remove();
+  RP.$('.top h1').textContent = 'Projetos'; document.title = 'Projetos · RoutProject';
+  S.sub.textContent = 'Todos os projetos: avanço, atenção e o que falta preparar';
+  const novo = Shell.pode('clientes', 'editar');
+  S.actions.innerHTML = novo ? '<a class="btn sm primary" href="/app/clientes.html?novo=1">+ Novo projeto</a>' : '';
+  carteira = await RP.api('/carteira');
+  const T = carteira.reduce((a, p) => ({ u: a.u + p.enderecos, c: a.c + p.concluidos, m: a.m + metaDe(p), at: a.at + p.atencao, ex: a.ex + p.em_execucao }), { u: 0, c: 0, m: 0, at: 0, ex: 0 });
+  const g = T.m ? Math.min(100, Math.round((T.c / T.m) * 100)) : 0;
+  const n = { todos: carteira.length, atencao: 0, execucao: 0, concluido: 0, preparo: 0 };
+  carteira.forEach((p) => n[situacao(p)]++);
+  S.content.innerHTML = `
+    ${carteira.length ? `<section class="pjhero card">
+      <div class="pjring" style="--p:${g}"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="50"/><circle cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="${g} 100"/></svg><div><b>${g}%</b><span>instalado</span></div></div>
+      <div class="pjhero-t"><h2>Avanço geral das instalações</h2><p class="muted">${RP.fmtN(T.c)} de ${RP.fmtN(T.m)} endereços da meta concluídos em ${carteira.length} projeto(s)</p>
+        <div class="pjbar lg"><i style="width:${g}%"></i></div></div>
+      <div class="pjhero-k">
+        <div><span>Unidades na rota</span><b>${RP.fmtN(T.u)}</b></div>
+        <div><span>Concluídas</span><b style="color:var(--ok)">${RP.fmtN(T.c)}</b></div>
+        <div><span>Em execução</span><b style="color:var(--info)">${RP.fmtN(T.ex)}</b></div>
+        <div><span>Atenção</span><b style="color:${T.at ? 'var(--err)' : 'inherit'}">${RP.fmtN(T.at)}</b></div>
+      </div>
+    </section>
+    <div class="pjtools">
+      <input class="input" id="pj-q" type="search" placeholder="Buscar projeto" value="${RP.esc(busca)}" aria-label="Buscar projeto">
+      <div class="vtabs" role="tablist" aria-label="Filtrar projetos" style="margin:0">${[['todos', 'Todos'], ['atencao', 'Com atenção'], ['execucao', 'Em execução'], ['preparo', 'Em preparação'], ['concluido', 'Concluídos']]
+        .filter(([k]) => k === 'todos' || n[k]).map(([k, t]) => `<button type="button" role="tab" class="eqc" data-f="${k}" aria-pressed="${filtroL === k}">${t} <small>${n[k]}</small></button>`).join('')}</div>
+    </div>` : ''}
+    <div class="pjgrid" id="pj-grid"></div>`;
+  const q$ = RP.$('#pj-q');
+  if (q$) q$.oninput = () => { busca = q$.value; cards(); };
+  RP.$$('[data-f]').forEach((b) => (b.onclick = () => { filtroL = b.dataset.f; RP.$$('[data-f]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); cards(); }));
+  cards();
+}
+
+// Para onde o card leva: projeto sem endereço vai para o cadastro (guia de preparação); senão para o painel
+function destino(p) {
+  if ((!p.enderecos_total || !Shell.pode('rota')) && Shell.pode('clientes')) return `/app/clientes.html?id=${p.id}`;
+  if (Shell.pode('rota')) return `/app/rota.html?c=${p.id}`;
+  return `/app/projetos.html?cliente=${p.id}`;
+}
+
+function cards() {
+  const lq = busca.trim().toLowerCase();
+  const l = carteira.filter((p) => (filtroL === 'todos' || situacao(p) === filtroL) && (!lq || p.nome.toLowerCase().includes(lq)));
+  const el = RP.$('#pj-grid');
+  const editaMeta = Shell.pode('rota', 'editar');
+  const novo = Shell.pode('clientes', 'editar') && filtroL === 'todos' && !lq ? '<a class="pjnovo" href="/app/clientes.html?novo=1"><b>+</b>Novo projeto<small class="muted" style="font-weight:400">Cliente, contrato e itens num formulário só</small></a>' : '';
+  if (!l.length) { el.innerHTML = novo || '<div class="card empty" style="grid-column:1/-1">Nenhum projeto neste filtro.</div>'; return; }
+  el.innerHTML = l.map((p) => {
+    const st = situacao(p), m = metaDe(p), falta = Math.max(0, m - p.concluidos), pc = pctP(p);
+    const extra = [p.contratos.length > 1 ? `<span>${p.contratos.length} contratos</span>` : '', p.sem_responsavel ? `<span class="warn">${RP.fmtN(p.sem_responsavel)} sem responsável</span>` : '', p.fora_rota ? `<span>${p.fora_rota} fora da rota</span>` : ''].join('');
+    return `<article class="pjcard" data-href="${destino(p)}" tabindex="0" role="link" aria-label="Abrir projeto ${RP.esc(p.nome)}">
+      <div class="pjtop"><span class="pjbadge" style="--c:${SIT[st][1]}"><i></i>${SIT[st][0]}</span></div>
+      <h3>${RP.esc(p.nome)}</h3>
+      <p class="pjdate">Criado em ${RP.fmtData(p.criado_em)}${p.fim_previsto ? ` · término previsto ${RP.fmtData(p.fim_previsto)}` : ''}</p>
+      ${extra ? `<div class="pjextra">${extra}</div>` : ''}
+      ${p.enderecos_total ? `<div class="pjmeta">
+        <div><span>Meta de instalações</span><b>${RP.fmtN(p.concluidos)} <small>/ ${RP.fmtN(m)}</small></b><small class="${falta ? '' : 'ok'}">${falta ? `${RP.fmtN(falta)} para concluir` : 'Meta atingida'}</small></div>
+        ${editaMeta ? `<button type="button" class="pjedit" data-meta="${p.id}" title="Editar a meta de instalações" aria-label="Editar a meta de ${RP.esc(p.nome)}">${ICO.ed}</button>` : ''}
+      </div>
+      <div class="pjprog"><div class="pjprog-h"><span>Avanço da meta</span><b>${pc}%</b></div><div class="pjbar" style="--c:${SIT[st][1]}"><i style="width:${pc}%"></i></div></div>
+      <div class="pjtiles">
+        <div><span class="ic">${ICO.un}</span><b>${RP.fmtN(p.enderecos)}</b><small>Unidades</small></div>
+        <div><span class="ic ok">${ICO.ok}</span><b>${RP.fmtN(p.concluidos)}</b><small>Concluídas</small></div>
+        <div class="${p.atencao ? 'hot' : ''}"><span class="ic at">${ICO.at}</span><b>${RP.fmtN(p.atencao)}</b><small>Atenção</small></div>
+      </div>` : '<p class="muted" style="margin:0">Ainda sem endereços. Abra para seguir a preparação do projeto.</p>'}
+      <p class="pjopen">Abrir projeto →</p>
+    </article>`;
+  }).join('') + novo;
+  RP.$$('.pjcard', el).forEach((c) => {
+    c.onclick = () => { location.href = c.dataset.href; };
+    c.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); location.href = c.dataset.href; } };
+  });
+  RP.$$('[data-meta]', el).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); editarMeta(carteira.find((p) => p.id === +b.dataset.meta)); }));
+}
+
+function editarMeta(p) {
+  RP.drawer(`Meta de instalações · ${p.nome}`, `
+    <p class="muted" style="margin-top:0">Quantos endereços este projeto precisa instalar. Deixe em branco para usar todos os endereços na rota (${RP.fmtN(p.enderecos)}).</p>
+    <div class="field"><label for="mt-v">Meta (endereços)</label><input class="input" id="mt-v" type="number" min="1" inputmode="numeric" value="${p.meta_instalacoes || ''}" placeholder="${p.enderecos}"></div>
+    <p class="muted" style="font-size:.88rem">Concluídos hoje: <b style="color:var(--ink)">${RP.fmtN(p.concluidos)}</b>. Endereços fora da rota não contam (marque em Cadastro e endereços).</p>`, {
+    onSave: async (el) => {
+      await RP.api(`/rota/${p.id}/meta`, { method: 'PUT', body: { meta: RP.$('#mt-v', el).value } });
+      RP.toast('Meta atualizada'); lista();
+    },
+  });
+}
+
+// ---------- Execução de um projeto (um contrato; troca de contrato pelas abas do projeto) ----------
+async function abrirCliente(cli) {
+  const cts = (await RP.api('/projetos')).filter((p) => p.cliente_id === cli);
+  if (!cts.length) {
+    Shell.projeto({ id: cli, nome: 'Projeto', ativo: 'projetos' });
+    S.sub.textContent = 'Execução';
+    S.content.innerHTML = `<div class="card empty"><p style="margin:0 0 12px">Este projeto ainda não tem contrato.</p>${Shell.pode('clientes') ? `<a class="btn primary" href="/app/clientes.html?id=${cli}">Ir para Cadastro e endereços</a>` : ''}</div>`;
+    return;
+  }
+  const lem = ultimoCt(cli);
+  await abrir((cts.find((c) => c.id === lem) || cts[0]).id);
 }
 
 async function abrir(id) {
+  if (!pessoas.length) pessoas = await RP.api('/pessoas').catch(() => []);
   [proj] = await Promise.all([RP.api('/projetos/' + id), carregarMon(id)]);
+  const cliId = proj.contrato.cliente_id;
+  lembrarCt(cliId, id);
   history.replaceState(null, '', '/app/projetos.html?id=' + id);
-  S.sub.textContent = `${proj.contrato.cliente} · ${proj.contrato.numero}`;
+  const irmaos = (await RP.api('/projetos').catch(() => [])).filter((p) => p.cliente_id === cliId);
+  const sel = irmaos.length > 1 ? `<select class="input" id="pj-ct" style="width:auto" aria-label="Contrato">${irmaos.map((c) => `<option value="${c.id}" ${c.id === id ? 'selected' : ''}>${RP.esc(c.numero)}${c.tipo === 'aditivo' ? ' (aditivo)' : ''}</option>`).join('')}</select>` : '';
+  Shell.projeto({ id: cliId, nome: proj.contrato.cliente, ativo: 'projetos', extra: sel });
+  RP.$('#pj-ct')?.addEventListener('change', (e) => abrir(+e.target.value));
+  S.sub.textContent = `Execução · ${proj.contrato.numero}: atividades de cada endereço e responsáveis`;
   const gestor = Shell.acao('distribuir');
-  S.actions.innerHTML = `<button class="btn sm" id="voltar">← Projetos</button><button class="btn sm" id="monl" title="Planilha de ativos, importação e envio ao Zabbix">Monitoramento</button>${gestor ? '<button class="btn sm primary" id="dist">Distribuir atividades</button>' : ''}`;
-  RP.$('#voltar').onclick = lista;
+  S.actions.innerHTML = `<button class="btn sm" id="monl" title="Planilha de ativos, importação e envio ao Zabbix">Monitoramento</button>${gestor ? '<button class="btn sm primary" id="dist">Distribuir atividades</button>' : ''}`;
   RP.$('#monl').onclick = monLote;
   if (gestor) RP.$('#dist').onclick = distribuir;
   render();
