@@ -49,8 +49,15 @@ module.exports = (app) => {
       await garantirPessoa(c, r.rows[0]);
       return r.rows[0];
     });
-    mail.sendApproved(u.email, u.nome).catch((e) => console.error('[mail]', e.message));
+    await mail.sendApproved(u.email, u.nome).catch((e) => console.error('[mail]', e.message)); // espera o envio (no Vercel a função para ao responder)
     return { ok: true };
+  });
+
+  // Envio de e-mail: situação e teste (vai para o e-mail de quem está logado)
+  app.get('/api/usuarios/email', admin, async () => mail.status());
+  app.post('/api/usuarios/email/teste', admin, async (req) => {
+    try { await mail.sendTeste(req.user.email, req.user.nome); } catch (e) { throw new HttpError(400, 'Não foi possível enviar: ' + e.message); }
+    return { ok: true, para: req.user.email };
   });
 
   app.patch('/api/usuarios/:id', admin, async (req) => {
@@ -84,7 +91,7 @@ module.exports = (app) => {
     return db.tx(async (c) => {
       if ((await c.query(`SELECT 1 FROM usuarios WHERE lower(email) = $1`, [email])).rows.length) throw new HttpError(409, 'Já existe um usuário com esse e-mail');
       const u = (await c.query(
-        `INSERT INTO usuarios (nome, email, senha_hash, empresa, telefone, perfil, status) VALUES ($1,$2,$3,$4,$5,$6,'ativo') RETURNING id, nome, email, perfil`,
+        `INSERT INTO usuarios (nome, email, senha_hash, empresa, telefone, perfil, status, trocar_senha) VALUES ($1,$2,$3,$4,$5,$6,'ativo',true) RETURNING id, nome, email, perfil`,
         [nome, email, hash, empresa, telefone, perfil])).rows[0];
       await garantirPessoa(c, u);
       if (telefone) await c.query(`UPDATE pessoas SET telefone = $1 WHERE usuario_id = $2`, [telefone, u.id]);
@@ -104,7 +111,7 @@ module.exports = (app) => {
     const hash = senha ? await sec.hashPassword(senha) : null;
     await db.tx(async (c) => {
       if ((await c.query(`SELECT 1 FROM usuarios WHERE lower(email) = $1 AND id <> $2`, [email, id])).rows.length) throw new HttpError(409, 'Já existe outro usuário com esse e-mail');
-      const r = await c.query(`UPDATE usuarios SET nome = $1, email = $2, empresa = $3, telefone = $4, senha_hash = COALESCE($5, senha_hash), atualizado_em = now() WHERE id = $6`,
+      const r = await c.query(`UPDATE usuarios SET nome = $1, email = $2, empresa = $3, telefone = $4, senha_hash = COALESCE($5, senha_hash), trocar_senha = (trocar_senha OR $5::text IS NOT NULL), atualizado_em = now() WHERE id = $6`,
         [nome, email, empresa, telefone, hash, id]);
       if (!r.rowCount) throw new HttpError(404, 'Usuário não encontrado');
       await c.query(`UPDATE pessoas SET nome = $1, telefone = COALESCE($2, telefone) WHERE usuario_id = $3`, [nome, telefone, id]);

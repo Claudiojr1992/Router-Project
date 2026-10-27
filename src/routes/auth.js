@@ -57,7 +57,7 @@ async function conferirCodigo(usuarioId, tipo, codigo) {
 
 function publico(u) {
   return { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, empresa: u.empresa, pessoa_id: u.pessoa_id || null,
-    perfil_nome: u.perm ? u.perm.nome : u.perfil, permissoes: u.perm ? u.perm.permissoes : {}, acoes: u.perm ? u.perm.acoes : {} };
+    perfil_nome: u.perm ? u.perm.nome : u.perfil, permissoes: u.perm ? u.perm.permissoes : {}, acoes: u.perm ? u.perm.acoes : {}, trocar_senha: !!u.trocar_senha };
 }
 
 module.exports = (app) => {
@@ -123,6 +123,8 @@ module.exports = (app) => {
     if (u.status === 'pendente_aprovacao') throw new HttpError(403, 'Seu cadastro aguarda aprovação do administrador', { status: u.status });
     if (u.status !== 'ativo') throw new HttpError(403, 'Acesso desativado. Fale com o administrador.', { status: u.status });
 
+    // senha que não segue a regra atual (ex.: senha de teste): entra, mas precisa trocar antes de usar o sistema
+    if (!sec.senhaValida(senha)) await db.query(`UPDATE usuarios SET trocar_senha = true WHERE id = $1`, [u.id]);
     const lembrar = req.body.lembrar === true;
     const token = sec.signSession({ uid: u.id });
     res.cookie(COOKIE, token, { maxAge: lembrar ? config.sessionHours * 3600 * 1000 : undefined });
@@ -173,7 +175,7 @@ module.exports = (app) => {
     const u = await db.one(`SELECT id, status FROM usuarios WHERE lower(email) = $1`, [email]);
     if (!u || u.status !== 'ativo') throw new HttpError(400, 'Código expirado. Peça um novo código.');
     await conferirCodigo(u.id, 'reset', req.body.codigo);
-    await db.query(`UPDATE usuarios SET senha_hash = $1, atualizado_em = now() WHERE id = $2`, [await sec.hashPassword(req.body.senha), u.id]);
+    await db.query(`UPDATE usuarios SET senha_hash = $1, trocar_senha = false, atualizado_em = now() WHERE id = $2`, [await sec.hashPassword(req.body.senha), u.id]);
     return { ok: true };
   });
 
@@ -182,7 +184,8 @@ module.exports = (app) => {
     const atual = await db.one(`SELECT senha_hash FROM usuarios WHERE id = $1`, [req.user.id]);
     if (!(await sec.verifyPassword(String(req.body.atual || ''), atual.senha_hash))) throw new HttpError(400, 'Senha atual incorreta');
     if (!sec.senhaValida(req.body.nova)) throw new HttpError(400, 'A nova senha precisa de 8 caracteres ou mais, com letras e números');
-    await db.query(`UPDATE usuarios SET senha_hash = $1, atualizado_em = now() WHERE id = $2`, [await sec.hashPassword(req.body.nova), req.user.id]);
+    if (String(req.body.nova) === String(req.body.atual)) throw new HttpError(400, 'A nova senha precisa ser diferente da atual');
+    await db.query(`UPDATE usuarios SET senha_hash = $1, trocar_senha = false, atualizado_em = now() WHERE id = $2`, [await sec.hashPassword(req.body.nova), req.user.id]);
     return { ok: true };
   });
 };

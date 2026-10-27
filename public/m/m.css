@@ -114,3 +114,12 @@ textarea.in{min-height:80px;resize:vertical}
 .tempos{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .tempos div{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
 .tempos span{display:block;font-size:.75rem;color:var(--muted)}
+/* Patrimônio no campo */
+.pat .lb{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-top:10px}
+.pat .row2{display:flex;gap:8px;align-items:flex-end}
+.pat .row2 .in{flex:1}
+.pat .ler{min-height:44px;margin-top:6px;flex:none}
+.patc{display:flex;flex-wrap:wrap;gap:6px}
+.patl{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:.9rem}
+.patl li{padding:6px 0;border-bottom:1px solid var(--line)}
+.patl span,.patl small{color:var(--muted)}

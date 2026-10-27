@@ -608,6 +608,13 @@ As ações menos usadas da lista de endereços (alterar ou excluir os listados, 
 
 **Patrimônio** (menu Operação, permissão *Patrimônio*): ativos com patrimônio e/ou número de série (únicos no sistema), item, fabricante, modelo, MAC, IP, endereço e situação (estoque, em transporte, instalado, em manutenção, baixado). Cards por item mostram quanto falta cadastrar/instalar; dá para importar planilha (atualiza pelo patrimônio/série), exportar, mover vários de uma vez e ver o histórico (auditoria). O endereço mostra os ativos dele e a contagem por item.
 
+## Patrimônio no app, previsão de receita, e-mail e senha temporária
+
+- **App do técnico**: na atividade, a seção **Patrimônio deste endereço** mostra os itens controlados (ex.: "Câmera 3/28") e registra patrimônio e série como **instalado** no endereço. Funciona sem internet (entra na fila) e, onde o navegador tem leitor de código (Chrome no Android), o botão **Ler** pega o número pela câmera.
+- **Faturamento → Receita por mês**: 6 meses para trás e 12 para a frente. **Gerado** = valor dos endereços concluídos no mês; **previsto** = endereços ainda abertos pelo fim (ou início) previsto × preços. Medido e recebido aparecem na dica e na tabela. Endereços sem data ou com previsão vencida ficam fora do gráfico, com o total ao lado. Também aparece no detalhe de cada contrato.
+- **E-mail**: a tela Usuários mostra se o envio está configurado e manda um e-mail de teste. Sem SMTP, os pedidos de acesso aparecem para o administrador com **Aprovar sem confirmação**. Variáveis: `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`.
+- **Senha temporária**: senha definida pelo administrador (novo usuário ou troca) e senha fora da regra (8+ caracteres com letras e números) obrigam a criar uma senha nova no próximo acesso (`/senha.html`). Até lá, a API só libera `/api/auth/*`.
+
 ## Vercel + Supabase
 
 O mesmo código roda no Vercel como uma função só (`api/index.js`), com o banco no Supabase.

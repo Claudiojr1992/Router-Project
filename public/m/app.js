@@ -100,6 +100,11 @@
       t.realizada_fim = a.status === 'concluida' ? a.em : null;
     }
     if (a.tipo === 'resposta') { (bundle.respostas[a.tarefa_id] = bundle.respostas[a.tarefa_id] || {})[a.item_id] = { valor: a.valor, ok: a.ok }; }
+    if (a.tipo === 'ativo') {
+      const p = ((bundle.patrimonio = bundle.patrimonio || {})[t.endereco_id] = (bundle.patrimonio || {})[t.endereco_id] || { itens: [], ativos: [] });
+      const igual = (x) => (a.patrimonio && x.patrimonio && x.patrimonio.toLowerCase() === a.patrimonio.toLowerCase()) || (a.numero_serie && x.numero_serie && x.numero_serie.toLowerCase() === a.numero_serie.toLowerCase());
+      if (!p.ativos.some(igual)) p.ativos.push({ client_id: a.id, item_id: a.item_id, patrimonio: a.patrimonio, numero_serie: a.numero_serie, status: 'instalado', local: true });
+    }
   }
 
   async function enfileirar(acao) {
@@ -122,6 +127,7 @@
     let res;
     try { res = await fetch('/api' + path, o); } catch (_) { throw Object.assign(new Error('Sem conexão'), { rede: true }); }
     let data = null; try { data = await res.json(); } catch (_) { /* vazio */ }
+    if (res.status === 403 && data && data.trocar_senha) { location.href = '/senha.html?volta=/m/'; throw Object.assign(new Error(data.erro), { status: 403, data }); }
     if (!res.ok) throw Object.assign(new Error((data && data.erro) || `Erro ${res.status}`), { status: res.status, data });
     return data;
   }
@@ -338,6 +344,7 @@
               <input class="in" data-item="${i.id}" ${i.tipo_resposta === 'numero' ? 'inputmode="decimal"' : ''} value="${esc(r.valor || '')}" placeholder="${i.tipo_resposta === 'numero' ? 'Número' : 'Escreva aqui'}" aria-label="${esc(i.texto)}"></div></div>`;
             return `<div class="it" data-it="${i.id}"><button class="box" role="checkbox" aria-checked="${!!r.ok}" data-check="${i.id}" aria-label="${esc(i.texto)}"></button><div class="tx">${esc(i.texto)}${obr}</div></div>`;
           }).join('')}</div>` : ''}
+        ${secPatrimonio(t)}
         <div class="sec">Fotos da atividade (${fotos.filter((f) => !f.item_id).length})</div>
         <div class="card pad"><div class="thumbs" style="margin-top:0">${thumbs(fotos.filter((f) => !f.item_id))}${botaoCam('')}</div>
           <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:.88rem;color:var(--muted)"><input type="checkbox" id="gps" ${meta.gps !== false ? 'checked' : ''}> Guardar a localização nas fotos</label></div>
@@ -371,6 +378,7 @@
       telaTarefa(id);
     }));
     $$('[data-foto]').forEach((inp) => (inp.onchange = () => novaFoto(t, inp.dataset.foto ? +inp.dataset.foto : null, inp.files[0])));
+    ligarPatrimonio(t, () => telaTarefa(id));
     $$('img.thumb').forEach((im) => (im.onclick = () => verFoto(im)));
     $('#gps').onchange = async (e) => { meta.gps = e.target.checked; await salvarMeta(); };
     $('#relPdf').onclick = (e) => {
@@ -382,6 +390,51 @@
       await enfileirar({ tipo: 'comentario', tarefa_id: t.id, texto });
       $('#coment').value = ''; toast(navigator.onLine ? 'Comentário enviado' : 'Comentário guardado para enviar');
     };
+  }
+
+  // ---------- Patrimônio no campo: registra patrimônio / série dos itens controlados deste endereço ----------
+  function secPatrimonio(t) {
+    const p = (B.patrimonio || {})[t.endereco_id];
+    if (!p || !p.itens.length) return '';
+    const inst = (i) => p.ativos.filter((a) => a.item_id === i.id && a.status === 'instalado').length;
+    const leitor = 'BarcodeDetector' in window;
+    return `<div class="sec">Patrimônio deste endereço</div>
+      <div class="card pad pat">
+        <div class="patc">${p.itens.map((i) => { const n = inst(i); return `<span class="pill ${n >= i.quantidade ? 'concluida' : 'a_fazer'}"><i></i>${esc(i.nome)} ${n}/${i.quantidade}</span>`; }).join('')}</div>
+        ${p.ativos.length ? `<ul class="patl">${p.ativos.map((a) => `<li><b>${esc(a.patrimonio || '—')}</b> <span>${esc(a.numero_serie ? 'série ' + a.numero_serie : '')}</span> <small>${esc((p.itens.find((i) => i.id === a.item_id) || {}).nome || '')}${a.local ? ' · na fila' : ''}</small></li>`).join('')}</ul>` : ''}
+        <label class="lb" for="pt-i">Item</label><select class="in" id="pt-i">${p.itens.map((i) => `<option value="${i.id}" ${inst(i) < i.quantidade ? '' : ''}>${esc(i.nome)}</option>`).join('')}</select>
+        <label class="lb" for="pt-p">Patrimônio</label><div class="row2"><input class="in" id="pt-p" autocomplete="off" placeholder="Ex.: BNB-000123">${leitor ? '<label class="btn sm ler" title="Ler o código com a câmera">Ler<input type="file" accept="image/*" capture="environment" hidden data-ler="pt-p"></label>' : ''}</div>
+        <label class="lb" for="pt-s">Número de série</label><div class="row2"><input class="in" id="pt-s" autocomplete="off" placeholder="Opcional se tiver patrimônio">${leitor ? '<label class="btn sm ler" title="Ler o código com a câmera">Ler<input type="file" accept="image/*" capture="environment" hidden data-ler="pt-s"></label>' : ''}</div>
+        <button class="btn primary block" style="margin-top:10px" id="pt-ok">Registrar como instalado</button>
+        <p class="muted" style="font-size:.8rem;margin:8px 0 0">Sem internet, fica guardado e é enviado na próxima sincronização.</p>
+      </div>`;
+  }
+  function ligarPatrimonio(t, redesenhar) {
+    const ok = $('#pt-ok'); if (!ok) return;
+    // sugere o primeiro item que ainda falta
+    const p = B.patrimonio[t.endereco_id];
+    const falta = p.itens.find((i) => p.ativos.filter((a) => a.item_id === i.id && a.status === 'instalado').length < i.quantidade);
+    if (falta) $('#pt-i').value = String(falta.id);
+    ok.onclick = async () => {
+      const patrimonio = $('#pt-p').value.trim(), numero_serie = $('#pt-s').value.trim();
+      if (!patrimonio && !numero_serie) { toast('Informe o patrimônio ou o número de série'); return; }
+      const dup = p.ativos.some((a) => (patrimonio && a.patrimonio && a.patrimonio.toLowerCase() === patrimonio.toLowerCase()) || (numero_serie && a.numero_serie && a.numero_serie.toLowerCase() === numero_serie.toLowerCase()));
+      if (dup) { toast('Esse patrimônio já está registrado aqui'); return; }
+      await enfileirar({ tipo: 'ativo', tarefa_id: t.id, item_id: +$('#pt-i').value, patrimonio: patrimonio || null, numero_serie: numero_serie || null });
+      toast(navigator.onLine ? 'Patrimônio registrado' : 'Patrimônio guardado para enviar');
+      redesenhar();
+      setTimeout(() => $('#pt-p')?.focus(), 50);
+    };
+    $$('[data-ler]').forEach((inp) => (inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return;
+      try {
+        const det = new window.BarcodeDetector();
+        const r = await det.detect(await createImageBitmap(f));
+        if (!r.length) { toast('Não achei código na foto. Aproxime e tente de novo.'); return; }
+        $('#' + inp.dataset.ler).value = r[0].rawValue; toast('Código lido');
+      } catch (_) { toast('Este aparelho não lê código pela câmera. Digite o número.'); }
+      inp.value = '';
+    }));
   }
 
   function verFoto(im) {
@@ -431,7 +484,7 @@
   }
 
   function nomeTarefa(id) { const t = B && B.tarefas.find((x) => x.id === id); return t ? `${t.atividade} · ${t.endereco}` : `Atividade ${id}`; }
-  const ROT = { status: (a) => `Status → ${ST[a.status]}`, resposta: (a) => `Checklist: ${a.ok ? 'item marcado' : 'item desmarcado'}`, comentario: () => 'Comentário', foto: () => 'Foto' };
+  const ROT = { status: (a) => `Status → ${ST[a.status]}`, resposta: (a) => `Checklist: ${a.ok ? 'item marcado' : 'item desmarcado'}`, comentario: () => 'Comentário', foto: () => 'Foto', ativo: (a) => `Patrimônio ${a.patrimonio || a.numero_serie}` };
 
   function telaSync() {
     layout({

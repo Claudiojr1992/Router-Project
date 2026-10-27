@@ -19,7 +19,7 @@ async function loadUser(req) {
   req.user = null;
   if (!data) return null;
   const u = await one(
-    `SELECT u.id, u.nome, u.email, u.perfil, u.status, u.empresa, p.id AS pessoa_id
+    `SELECT u.id, u.nome, u.email, u.perfil, u.status, u.empresa, u.trocar_senha, p.id AS pessoa_id
        FROM usuarios u LEFT JOIN pessoas p ON p.usuario_id = u.id
       WHERE u.id = $1`, [data.uid]);
   if (!u || u.status !== 'ativo') return null;
@@ -37,6 +37,8 @@ function requer(...perfis) {
   return async (req) => {
     const u = await loadUser(req);
     if (!u) throw new HttpError(401, 'Faça login para continuar');
+    // senha temporária ou fraca: só a troca de senha (rotas /api/auth/*) fica liberada
+    if (u.trocar_senha && !req.path.startsWith('/api/auth/')) throw new HttpError(403, 'Troque a sua senha para continuar', { trocar_senha: true });
     const r = perm.checarRota(u, req.method, req.path);
     if (r === true) return;
     if (typeof r === 'string') throw new HttpError(403, r);

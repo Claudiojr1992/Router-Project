@@ -48,6 +48,28 @@ module.exports = (app) => {
        FROM contratos ct JOIN clientes cl ON cl.id = ct.cliente_id LEFT JOIN enderecos e ON e.contrato_id = ct.id
       WHERE ct.status <> 'encerrado' AND cl.ativo GROUP BY ct.id, cl.id ORDER BY cl.nome, ct.tipo DESC, ct.id`));
 
+  // Previsão de receita por mês: o que já foi gerado (endereços concluídos), o que está previsto pelo plano
+  // (fim ou início previsto × preços) e o que foi medido e recebido. 6 meses para trás e 12 para a frente.
+  app.get('/api/faturamento/previsao', escritorio, async (req) => {
+    const ct = req.query.contrato ? v.id(req.query.contrato, 'Contrato') : null;
+    const meses = await db.many(
+      `WITH m AS (SELECT generate_series(date_trunc('month', CURRENT_DATE) - interval '6 months', date_trunc('month', CURRENT_DATE) + interval '11 months', interval '1 month')::date AS mes),
+            e AS (SELECT e.*, ${VALOR} AS valor FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id JOIN clientes cl ON cl.id = ct.cliente_id
+                   WHERE ct.status <> 'encerrado' AND cl.ativo AND ($1::bigint IS NULL OR ct.id = $1))
+       SELECT to_char(m.mes, 'YYYY-MM') AS mes,
+              COALESCE((SELECT sum(valor) FROM e WHERE e.concluido_em IS NOT NULL AND date_trunc('month', e.concluido_em) = m.mes), 0)::float AS gerado,
+              COALESCE((SELECT sum(valor) FROM e WHERE e.concluido_em IS NULL AND date_trunc('month', COALESCE(e.fim_previsto, e.inicio_previsto)) = m.mes), 0)::float AS previsto,
+              COALESCE((SELECT count(*) FROM e WHERE e.concluido_em IS NULL AND date_trunc('month', COALESCE(e.fim_previsto, e.inicio_previsto)) = m.mes), 0)::int AS previstos,
+              COALESCE((SELECT sum(md.valor_total) FROM medicoes md JOIN contratos ct ON ct.id = md.contrato_id WHERE ct.status <> 'encerrado' AND ($1::bigint IS NULL OR ct.id = $1) AND md.competencia = m.mes), 0)::float AS medido,
+              COALESCE((SELECT sum(md.valor_total) FROM medicoes md JOIN contratos ct ON ct.id = md.contrato_id WHERE ct.status <> 'encerrado' AND ($1::bigint IS NULL OR ct.id = $1) AND md.status = 'recebida' AND date_trunc('month', md.recebida_em) = m.mes), 0)::float AS recebido
+         FROM m ORDER BY m.mes`, [ct]);
+    const fora = await db.one(
+      `SELECT count(*)::int AS n, COALESCE(sum(${VALOR}),0)::float AS valor FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id
+        WHERE ct.status <> 'encerrado' AND ($1::bigint IS NULL OR ct.id = $1) AND e.concluido_em IS NULL
+          AND (COALESCE(e.fim_previsto, e.inicio_previsto) IS NULL OR COALESCE(e.fim_previsto, e.inicio_previsto) < date_trunc('month', CURRENT_DATE))`, [ct]);
+    return { meses, atual: new Date().toISOString().slice(0, 7), sem_data_ou_atrasado: fora };
+  });
+
   app.get('/api/faturamento/contratos/:id', escritorio, async (req) => {
     const id = v.id(req.params.id);
     const contrato = await db.one(`SELECT ct.*, cl.nome AS cliente, (SELECT nome FROM empresas em WHERE em.id = ct.empresa_id) AS empresa

@@ -82,6 +82,7 @@ const Shell = (() => {
     let user;
     try { user = (await RP.api('/auth/me')).usuario; } catch (_) { return new Promise(() => {}); }
     eu = user;
+    if (user.trocar_senha) { location.replace('/senha.html?volta=' + encodeURIComponent(location.pathname + location.search)); return new Promise(() => {}); }
     const side = RP.$('#side');
     side.innerHTML = '<div class="sidetop">' + RP.logo('/app/') + `<button type="button" class="minibtn" id="minibtn" title="Encolher o menu" aria-label="Encolher o menu" aria-pressed="false">${svg('mini')}</button></div>` + '<nav aria-label="Menu principal">' + MENU.filter((m) => m.grp || (!m.grupo && pode(m.mod)))
       .map((m) => (m.grp ? `<div class="grp">${m.grp}</div>` :

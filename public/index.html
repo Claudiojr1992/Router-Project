@@ -33,7 +33,9 @@
 <script>
 const msg = RP.$('#msg');
 const volta = new URLSearchParams(location.search).get('volta');
-const destino = (u) => (volta && volta.startsWith('/app/')) ? volta : (u.perfil === 'tecnico' ? '/m/' : u.perfil === 'admin' || ['rota', 'projetos', 'clientes'].some((m) => u.permissoes && u.permissoes[m] && u.permissoes[m] !== 'nenhum') ? '/app/projetos.html' : '/app/tarefas.html');
+const destino0 = (u) => (volta && volta.startsWith('/app/')) ? volta : (u.perfil === 'tecnico' ? '/m/' : u.perfil === 'admin' || ['rota', 'projetos', 'clientes'].some((m) => u.permissoes && u.permissoes[m] && u.permissoes[m] !== 'nenhum') ? '/app/projetos.html' : '/app/tarefas.html');
+// senha temporária ou fraca: primeiro cria a senha nova
+const destino = (u) => (u.trocar_senha ? '/senha.html?volta=' + encodeURIComponent(destino0(u)) : destino0(u));
 RP.api('/auth/me').then((r) => { location.replace(destino(r.usuario)); }).catch(() => {});
 RP.$('#f').addEventListener('submit', (e) => {
   e.preventDefault();

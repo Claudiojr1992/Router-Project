@@ -530,3 +530,28 @@ a.pjedit{text-decoration:none}
 .patcard.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 .patcard>span{font-size:.9rem;color:var(--muted)}
 .patcard>span b{color:var(--ink);font-size:1.15rem}
+/* Receita por mês (Faturamento) */
+.rec header{flex-wrap:wrap;gap:10px}
+.rec-leg{display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted)}
+.rec-leg i,.rec-tip i{display:inline-block;width:12px;height:12px;border-radius:3px}
+.rec .g{background:var(--accent)}
+.rec .p{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--accent) 45%,transparent) 0 3px,color-mix(in srgb,var(--accent) 18%,transparent) 3px 6px);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 55%,transparent)}
+.rec-k{display:flex;flex-wrap:wrap;gap:24px;padding:4px 16px 8px}
+.rec-k>div{display:flex;flex-direction:column;gap:2px}
+.rec-k span{font-size:.8rem;color:var(--muted)}
+.rec-k b{font-size:1.2rem}
+.rec-ch{position:relative;display:flex;align-items:stretch;gap:6px;height:190px;padding:10px 16px 6px;border-top:1px solid var(--line)}
+.rec-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;outline:none;cursor:default}
+.rec-col>span{font-size:.72rem;color:var(--muted);white-space:nowrap}
+.rec-col.hoje>span{color:var(--ink);font-weight:700}
+.rec-col:hover .rec-bar,.rec-col:focus-visible .rec-bar{background:var(--soft)}
+.rec-bar{height:146px;flex:none;width:100%;max-width:38px;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;border-bottom:1px solid var(--line);border-radius:6px 6px 0 0}
+.rec-bar i{display:block;width:100%;border-radius:4px 4px 0 0;min-height:2px}
+.rec-bar i.g{border-radius:0}
+.rec-bar i:first-child{border-radius:4px 4px 0 0}
+.rec-col.hoje .rec-bar{box-shadow:inset 0 -2px 0 var(--accent)}
+.rec-tip{position:absolute;top:6px;z-index:5;display:flex;flex-direction:column;gap:3px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:8px 10px;font-size:.82rem;pointer-events:none;white-space:nowrap}
+.rec-tip span{display:flex;align-items:center;gap:6px;color:var(--muted)}
+.rec-tip span b{color:var(--ink)}
+.rec-tab{border-top:1px solid var(--line)}
+@media (max-width:640px){.rec-col>span{font-size:.6rem;writing-mode:vertical-rl;transform:rotate(180deg)}.rec-ch{gap:3px;height:210px}}

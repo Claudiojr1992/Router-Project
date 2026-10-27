@@ -24,18 +24,34 @@ let S, us = [];
   carregar();
 })();
 
+// Situação do envio de e-mail (códigos de confirmação, recuperação de senha e aviso de acesso liberado)
+let mailSt = null;
+async function caixaEmail() {
+  const box = RP.$('#mailbox'); if (!box) return;
+  try { mailSt = mailSt || await RP.api('/usuarios/email'); } catch (_) { return; }
+  box.innerHTML = mailSt.configurado
+    ? `<div class="alert ok" style="margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span><b>E-mail configurado</b> · ${RP.esc(mailSt.host)}:${mailSt.porta} · remetente ${RP.esc(mailSt.remetente)}</span><span class="spacer"></span><button class="btn sm" id="mt">Enviar e-mail de teste para mim</button></div>`
+    : `<div class="alert warn" style="margin:0"><b>O envio de e-mail não está configurado.</b> Quem se cadastra não recebe o código de confirmação e a recuperação de senha não chega. Até configurar, aprove os pedidos aqui (“Aprovar sem confirmação”) e crie os usuários com senha inicial em “+ Novo usuário”.
+        <br><span class="muted">Para ligar: no Vercel, crie <b>SMTP_HOST</b>, <b>SMTP_PORT</b> (587), <b>SMTP_USER</b>, <b>SMTP_PASS</b> e <b>MAIL_FROM</b> (ex.: RoutProject &lt;nao-responda@suaempresa.com.br&gt;) com os dados do seu provedor de e-mail e publique de novo.</span></div>`;
+  RP.$('#mt')?.addEventListener('click', (e) => RP.busy(e.currentTarget, async () => {
+    try { const r = await RP.api('/usuarios/email/teste', { method: 'POST' }); RP.toast('E-mail de teste enviado para ' + r.para); } catch (er) { RP.toast(er.message); }
+  }));
+}
+
 async function carregar() { us = await RP.api('/usuarios'); render(); }
 const optPerfis = (sel) => PERFIS.map((p) => `<option value="${p}" ${p === sel ? 'selected' : ''}>${RP.esc(NOMES[p] || p)}</option>`).join('');
 
 function render() {
-  const pend = us.filter((u) => u.status === 'pendente_aprovacao');
-  const outros = us.filter((u) => u.status !== 'pendente_aprovacao');
+  // pedidos de acesso: os que confirmaram o e-mail e os que ainda não (sem envio de e-mail o código não chega; o administrador libera)
+  const pend = us.filter((u) => u.status === 'pendente_aprovacao' || u.status === 'pendente_email');
+  const outros = us.filter((u) => !pend.includes(u));
   S.content.innerHTML = `
+    <div id="mailbox"></div>
     <div class="card"><header><h2>Aguardando aprovação</h2><span class="pill" style="color:${pend.length ? 'var(--warn)' : 'var(--muted)'}">${pend.length}</span></header>
       ${pend.length ? pend.map((u) => `<div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line)">
-        <span class="avatar">${RP.esc(RP.iniciais(u.nome))}</span><div style="flex:1;min-width:180px"><b>${RP.esc(u.nome)}</b><div class="muted" style="font-size:.88rem">${RP.esc(u.email)}${u.empresa ? ' · ' + RP.esc(u.empresa) : ''} · pediu: ${RP.esc(NOMES[u.perfil_solicitado] || u.perfil_solicitado || "—")}</div></div>
+        <span class="avatar">${RP.esc(RP.iniciais(u.nome))}</span><div style="flex:1;min-width:180px"><b>${RP.esc(u.nome)}</b><div class="muted" style="font-size:.88rem">${RP.esc(u.email)}${u.empresa ? ' · ' + RP.esc(u.empresa) : ''} · pediu: ${RP.esc(NOMES[u.perfil_solicitado] || u.perfil_solicitado || "—")}${u.status === 'pendente_email' ? ' · <span style="color:var(--warn)">e-mail ainda não confirmado</span>' : ''}</div></div>
         <select class="input" style="max-width:170px" data-perfil="${u.id}" aria-label="Perfil">${optPerfis(u.perfil_solicitado || 'tecnico')}</select>
-        <button class="btn sm primary" data-ok="${u.id}">Aprovar</button><button class="btn sm danger" data-no="${u.id}">Recusar</button></div>`).join('')
+        <button class="btn sm primary" data-ok="${u.id}" ${u.status === 'pendente_email' ? 'title="Libera mesmo sem a confirmação do e-mail"' : ''}>${u.status === 'pendente_email' ? 'Aprovar sem confirmação' : 'Aprovar'}</button><button class="btn sm danger" data-no="${u.id}">Recusar</button></div>`).join('')
       : '<div class="empty" style="padding:24px">Nenhum cadastro pendente.</div>'}</div>
     <div class="card"><header><h2>Todos os usuários</h2></header><div class="scroll"><table class="tbl">
       <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Situação</th><th>Último acesso</th><th></th></tr></thead>
@@ -44,6 +60,7 @@ function render() {
         <td>${STATUS[u.status]}</td><td>${RP.fmtDataHora(u.ultimo_acesso)}</td>
         <td style="white-space:nowrap"><button class="btn sm" data-ed="${u.id}">Editar</button> ${u.id === S.user.id ? '<span class="muted">você</span>' : u.status === 'ativo' ? `<button class="btn sm danger" data-off="${u.id}">Desativar</button>`
           : u.status === 'inativo' ? `<button class="btn sm" data-on="${u.id}" data-p="${u.perfil}">Reativar</button>` : `<button class="btn sm danger" data-no="${u.id}">Excluir</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
+  caixaEmail();
   const acao = (sel, fn) => RP.$$(sel, S.content).forEach((b) => (b.onclick = () => RP.busy(b, async () => { try { await fn(b); await carregar(); } catch (e) { RP.toast(e.message); } })));
   acao('[data-ok]', async (b) => { await RP.api(`/usuarios/${b.dataset.ok}/aprovar`, { method: 'POST', body: { perfil: RP.$(`[data-perfil="${b.dataset.ok}"]`).value } }); RP.toast('Acesso liberado'); });
   acao('[data-no]', async (b) => { if (!confirm('Recusar e apagar este cadastro?')) throw new Error('Cancelado'); await RP.api('/usuarios/' + b.dataset.no, { method: 'DELETE' }); RP.toast('Cadastro removido'); });

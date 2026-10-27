@@ -12,6 +12,9 @@ const RP = (() => {
     if (!res.ok) {
       const err = new Error((data && data.erro) || `Erro ${res.status}`);
       err.status = res.status; err.data = data;
+      if (res.status === 403 && data && data.trocar_senha && location.pathname !== '/senha.html') {
+        location.href = '/senha.html?volta=' + encodeURIComponent(location.pathname + location.search);
+      }
       if (res.status === 401 && location.pathname.startsWith('/app/')) {
         location.href = '/?volta=' + encodeURIComponent(location.pathname + location.search);
       }

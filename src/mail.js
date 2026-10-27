@@ -56,4 +56,13 @@ async function sendApproved(to, nome) {
     `Olá, ${nome}. Seu acesso ao RoutProject foi aprovado: ${config.appUrl}/`);
 }
 
-module.exports = { send, sendConfirmCode, sendResetCode, sendApproved };
+// Situação do envio (tela de Usuários) e e-mail de teste
+const status = () => ({ configurado: !!transporter, host: config.smtp.host || null, porta: config.smtp.port, remetente: config.smtp.from });
+async function sendTeste(to, nome) {
+  if (!transporter) throw new Error('O envio de e-mail não está configurado (SMTP_HOST, SMTP_USER, SMTP_PASS e MAIL_FROM)');
+  await send(to, 'RoutProject · E-mail de teste',
+    layout('E-mail de teste', `<p>Olá, ${esc(nome)}. Se você recebeu esta mensagem, o envio de e-mail do RoutProject está funcionando.</p>`),
+    `Olá, ${nome}. O envio de e-mail do RoutProject está funcionando.`);
+}
+
+module.exports = { send, sendConfirmCode, sendResetCode, sendApproved, status, sendTeste };

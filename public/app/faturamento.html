@@ -65,6 +65,7 @@ async function lista() {
         <div><span>Recebido</span><b style="color:var(--ok)">${RC(T.rec)}</b></div>
       </div>
     </section>
+    <div id="rec"></div>
     <div class="pjtools">
       <input class="input" id="fc-q" type="search" placeholder="Buscar cliente ou contrato" value="${RP.esc(fBusca)}" aria-label="Buscar contrato">
       <div class="vtabs" role="tablist" aria-label="Filtrar contratos" style="margin:0">${[['todos', 'Todos'], ['pronto', 'Prontos para medir'], ['medicao', 'Em medição'], ['recebido', 'Recebidos'], ['aguarda', 'Aguardando']]
@@ -74,6 +75,7 @@ async function lista() {
   const q$ = RP.$('#fc-q'); q$.oninput = () => { fBusca = q$.value; fcards(); };
   RP.$$('[data-ff]').forEach((b) => (b.onclick = () => { fFiltro = b.dataset.ff; RP.$$('[data-ff]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); fcards(); }));
   fcards();
+  receita(RP.$('#rec'));
 }
 
 function fcards() {
@@ -106,6 +108,37 @@ function fcards() {
   });
 }
 
+// ---------- Receita por mês: gerado (concluídos) + previsto pelo plano; medido e recebido na dica e na tabela ----------
+const MESC = (ym) => { const [y, m] = ym.split('-'); return ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][+m - 1] + '/' + y.slice(2); };
+async function receita(el, contrato = null) {
+  if (!el) return;
+  let d; try { d = await RP.api('/faturamento/previsao' + (contrato ? '?contrato=' + contrato : '')); } catch (_) { return; }
+  const ms = d.meses, max = Math.max(1, ...ms.map((m) => m.gerado + m.previsto));
+  const futuro = ms.filter((m) => m.mes >= d.atual).reduce((a, m) => a + m.previsto + (m.mes === d.atual ? m.gerado : 0), 0);
+  const passado = ms.filter((m) => m.mes < d.atual).reduce((a, m) => a + m.gerado, 0);
+  el.innerHTML = `<div class="card rec"><header><h2>Receita por mês</h2><span class="spacer"></span>
+      <span class="rec-leg"><i class="g"></i>Gerado (endereços concluídos)</span><span class="rec-leg"><i class="p"></i>Previsto pelo plano</span>
+      <button class="btn sm" type="button" id="rec-t" aria-expanded="false">Ver tabela</button></header>
+    <div class="rec-k"><div><span>Gerado nos últimos 6 meses</span><b>${R$(passado)}</b></div><div><span>Previsto deste mês até ${MESC(ms[ms.length - 1].mes)}</span><b>${R$(futuro)}</b></div>
+      ${d.sem_data_ou_atrasado.n ? `<div><span>Sem data ou com previsão vencida</span><b style="color:var(--warn)">${R$(d.sem_data_ou_atrasado.valor)}</b><small class="muted">${d.sem_data_ou_atrasado.n} endereço(s), fora do gráfico</small></div>` : ''}</div>
+    <div class="rec-ch" role="img" aria-label="Valor gerado e previsto por mês">
+      ${ms.map((m) => { const hg = Math.round(m.gerado / max * 140), hp = Math.round(m.previsto / max * 140);
+        return `<div class="rec-col ${m.mes === d.atual ? 'hoje' : ''}" data-m="${m.mes}" tabindex="0"><div class="rec-bar">${m.previsto ? `<i class="p" style="height:${Math.max(2, hp)}px"></i>` : ''}${m.gerado ? `<i class="g" style="height:${Math.max(2, hg)}px"></i>` : ''}</div><span>${MESC(m.mes)}</span></div>`; }).join('')}
+      <div class="rec-tip" hidden></div></div>
+    <div class="scroll rec-tab" hidden><table class="tbl"><thead><tr><th>Mês</th><th style="text-align:right">Gerado</th><th style="text-align:right">Previsto</th><th style="text-align:right">Medido</th><th style="text-align:right">Recebido</th></tr></thead>
+      <tbody>${ms.map((m) => `<tr><td>${MESC(m.mes)}${m.mes === d.atual ? ' <span class="muted">(atual)</span>' : ''}</td><td style="text-align:right">${R$(m.gerado)}</td><td style="text-align:right">${R$(m.previsto)}${m.previstos ? ` <small class="muted">${m.previstos} end.</small>` : ''}</td><td style="text-align:right">${R$(m.medido)}</td><td style="text-align:right">${R$(m.recebido)}</td></tr>`).join('')}</tbody></table></div></div>`;
+  const tip = RP.$('.rec-tip', el), ch = RP.$('.rec-ch', el);
+  const mostra = (col) => {
+    const m = ms.find((x) => x.mes === col.dataset.m);
+    tip.innerHTML = `<b>${MESC(m.mes)}</b><span><i class="g"></i>Gerado <b>${R$(m.gerado)}</b></span><span><i class="p"></i>Previsto <b>${R$(m.previsto)}</b>${m.previstos ? ` (${m.previstos} end.)` : ''}</span><span>Medido ${R$(m.medido)} · Recebido ${R$(m.recebido)}</span>`;
+    tip.hidden = false;
+    const r = col.getBoundingClientRect(), rc = ch.getBoundingClientRect();
+    tip.style.left = Math.min(rc.width - tip.offsetWidth - 4, Math.max(4, r.left - rc.left + r.width / 2 - tip.offsetWidth / 2)) + 'px';
+  };
+  RP.$$('.rec-col', el).forEach((c) => { c.onmouseenter = () => mostra(c); c.onfocus = () => mostra(c); c.onmouseleave = c.onblur = () => { tip.hidden = true; }; });
+  RP.$('#rec-t', el).onclick = (e) => { const t = RP.$('.rec-tab', el); t.hidden = !t.hidden; e.currentTarget.setAttribute('aria-expanded', String(!t.hidden)); e.currentTarget.textContent = t.hidden ? 'Ver tabela' : 'Ocultar tabela'; };
+}
+
 async function abrirContrato(id) {
   history.replaceState(null, '', '/app/faturamento.html?c=' + id);
   const d = await RP.api('/faturamento/contratos/' + id);
@@ -119,6 +152,7 @@ async function abrirContrato(id) {
       <div style="flex:1;min-width:240px"><h2 style="font-size:1.6rem">${RP.esc(ct.cliente)} · ${RP.esc(ct.numero)}</h2>
         <div class="muted">${ct.empresa ? 'Executora: ' + RP.esc(ct.empresa) + ' · ' : ''}faturar ${REGRA[ct.regra_cobranca]}${ct.valor_endereco ? ' · taxa ' + R$(ct.valor_endereco) + ' por endereço' : ''}${ct.exige_patrimonio ? ' · exige patrimônio instalado' : ''}${!d.itens.some((i) => i.faturavel && i.valor_unitario != null) && !ct.valor_endereco ? ' <span class="tag-late">defina os preços em Cadastro e endereços → Contratos → Itens e preços</span>' : ''}</div></div>
       <div class="kpi" style="min-width:180px"><span>Pronto para medir</span><b>${R$(totApto)}</b><small class="muted">${d.aptos.length} endereço(s)</small></div></div></div>
+    <div id="rec-ct"></div>
     <div class="card"><header><h2>Itens e preços</h2><span class="spacer"></span><a class="btn sm" href="/app/clientes.html?id=${ct.cliente_id}&aba=contratos">Editar preços</a></header>
       ${d.itens.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Item</th><th style="text-align:right">Valor unitário</th><th style="text-align:right">Previsto</th><th style="text-align:right">Concluído</th><th style="text-align:right">Valor previsto</th><th style="text-align:right">Valor gerado</th><th>Patrimônio</th></tr></thead><tbody>
         ${d.itens.map((i) => { const fat = i.faturavel && i.valor_unitario != null; return `<tr><td><b>${RP.esc(i.nome)}</b></td><td style="text-align:right">${fat ? R$(i.valor_unitario) : '<span class="muted">não fatura</span>'}</td>
@@ -136,7 +170,8 @@ async function abrirContrato(id) {
       ${d.aptos.length ? `<div class="scroll" style="max-height:420px"><table class="tbl"><thead><tr><th>Código</th><th>Endereço</th><th>Município</th><th>Status</th><th>Composição</th><th style="text-align:right">Valor</th></tr></thead><tbody>
         ${d.aptos.map((e) => `<tr><td>${RP.esc(e.codigo || '—')}</td><td><b>${RP.esc(e.nome)}</b></td><td>${RP.esc(e.municipio)}/${e.uf}</td><td>${RP.esc(e.status)}</td><td class="muted" style="font-size:.85rem">${compos(e.detalhe, ct.valor_endereco)}</td><td style="text-align:right">${R$(e.valor)}</td></tr>`).join('')}</tbody></table></div>`
         : `<div class="empty">Nenhum endereço apto agora. Eles aparecem aqui quando chegam ${ct.regra_cobranca === 'apos_handover' ? 'ao Handover' : 'à Validação'} (ou são concluídos).</div>`}</div>`;
-  RP.$$('[data-m]', S.content).forEach((r) => { r.onclick = () => medicao(+r.dataset.m); r.onkeydown = (e) => { if (e.key === 'Enter') r.onclick(); }; });
+  RP.$$('tr[data-m]', S.content).forEach((r) => { r.onclick = () => medicao(+r.dataset.m); r.onkeydown = (e) => { if (e.key === 'Enter') r.onclick(); }; });
+  receita(RP.$('#rec-ct'), id);
 }
 
 function novaMedicao() {

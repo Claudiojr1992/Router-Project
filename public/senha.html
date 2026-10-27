@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Criar nova senha · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="auth">
+  <aside class="auth-brand" id="brand"></aside>
+  <main class="auth-main">
+    <form class="auth-card" id="f" novalidate>
+      <span class="mobile-logo"></span>
+      <h1>Crie a sua senha</h1>
+      <p class="lead" id="lead">A senha atual é temporária ou não segue a regra de segurança. Crie uma senha nova para continuar.</p>
+      <div class="alert" id="msg" hidden></div>
+      <div class="field"><label for="atual">Senha atual</label><div class="pw"><input class="input" id="atual" type="password" autocomplete="current-password" required></div></div>
+      <div class="field"><label for="nova">Nova senha</label><div class="pw"><input class="input" id="nova" type="password" autocomplete="new-password" data-strength="st" required></div>
+        <div class="strength"><i id="st"></i></div><small id="st-t">Use 8+ caracteres com letras e números</small></div>
+      <div class="field"><label for="nova2">Confirme a nova senha</label><div class="pw"><input class="input" id="nova2" type="password" autocomplete="new-password" required></div></div>
+      <button class="btn primary block" id="go">Salvar e continuar</button>
+      <p class="alt"><a href="#" id="sair">Sair</a></p>
+    </form>
+  </main>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+// Destino depois da troca: só caminhos do próprio sistema
+const pedido = new URLSearchParams(location.search).get('volta') || '';
+const volta = /^\/(app|m)\//.test(pedido) ? pedido : '/app/';
+const msg = RP.$('#msg');
+RP.api('/auth/me').then((r) => { if (!r.usuario.trocar_senha) RP.$('#lead').textContent = 'Troque a sua senha.'; }).catch(() => location.replace('/'));
+RP.$('#sair').onclick = async (e) => { e.preventDefault(); try { await RP.api('/auth/logout', { method: 'POST' }); } catch (_) { /* segue */ } location.href = '/'; };
+RP.$('#f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (RP.$('#nova').value !== RP.$('#nova2').value) { RP.showAlert(msg, 'err', 'As senhas novas não conferem'); return; }
+  RP.busy(RP.$('#go'), async () => {
+    try {
+      await RP.api('/auth/senha', { method: 'POST', body: { atual: RP.$('#atual').value, nova: RP.$('#nova').value } });
+      location.replace(volta);
+    } catch (err) { RP.showAlert(msg, 'err', err.message); }
+  });
+});
+</script>
+</body>
+</html>

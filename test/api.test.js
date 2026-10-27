@@ -86,6 +86,15 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     const md = (await admin.get('/api/medicoes/' + m.json.id)).json;
     assert.equal(md.valor_total, 250);
     assert.deepEqual(md.resumo.map((r) => [r.item, r.quantidade, r.total]), [['Câmera', 2, 200], ['Taxa por endereço', 1, 50]]);
+    const prev = (await admin.get('/api/faturamento/previsao?contrato=' + fct)).json;
+    assert.equal(prev.meses.length, 18);
+    assert.equal(prev.meses.find((x) => x.mes === prev.atual).gerado, 250, 'concluído hoje entra como gerado no mês atual');
+    // patrimônio registrado pelo app (fila offline) fica instalado no endereço da atividade
+    const tarefa = (await admin.get('/api/projetos/' + ct)).json.enderecos.flatMap((x) => x.tarefas)[0];
+    const r = (await admin.post('/api/mobile/acoes', { acoes: [{ id: require('crypto').randomUUID(), tipo: 'ativo', tarefa_id: tarefa.id, patrimonio: `APP${sufixo}` }] })).json;
+    assert.equal(r.resultados[0].ok, true, JSON.stringify(r));
+    const noEnd = (await admin.get(`/api/enderecos/${tarefa.endereco_id}/ativos`)).json;
+    assert.ok(noEnd.some((x) => x.patrimonio === `APP${sufixo}` && x.status === 'instalado'));
     const imp = (await admin.post('/api/ativos/lote', { contrato_id: fct, linhas: [{ patrimonio: `P${sufixo}-3`, item: 'Câmera' }, { patrimonio: `P${sufixo}-4`, item: 'Inexistente' }] })).json;
     assert.equal(imp.novos, 1); assert.equal(imp.erros.length, 1);
   });
@@ -109,6 +118,10 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     const u = await admin.post('/api/usuarios', { nome: 'Visitante', email: `v_${sufixo}@teste.local`, perfil: p.json.codigo, senha: 'Senha1234' });
     assert.equal(u.status, 200);
     assert.equal((await visitante.post('/api/auth/login', { email: `v_${sufixo}@teste.local`, senha: 'Senha1234' })).status, 200);
+    // senha definida pelo administrador é temporária: antes de trocar, só /api/auth fica liberado
+    const bloq = await visitante.get('/api/clientes');
+    assert.equal(bloq.status, 403); assert.equal(bloq.json.trocar_senha, true);
+    assert.equal((await visitante.post('/api/auth/senha', { atual: 'Senha1234', nova: 'Senha5678x' })).status, 200);
     assert.equal((await visitante.get('/api/clientes')).status, 200);
     assert.equal((await visitante.put('/api/enderecos/' + end.id, { nome: 'x', municipio: 'Fortaleza', uf: 'CE', cameras: 1 })).status, 403);
     assert.equal((await visitante.get('/api/auditoria')).status, 403);

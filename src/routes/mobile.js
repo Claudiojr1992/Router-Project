@@ -19,7 +19,7 @@ function uuid(x, campo = 'Identificador') {
 // Garante que a tarefa está com o usuário (ou que ele é do escritório)
 async function tarefaDoUsuario(c, user, tarefaId) {
   const t = (await c.query(
-    `SELECT t.id, t.status, t.responsavel_id, a.checklist_id FROM tarefas t JOIN atividades a ON a.id = t.atividade_id WHERE t.id = $1`, [tarefaId])).rows[0];
+    `SELECT t.id, t.status, t.responsavel_id, t.endereco_id, a.checklist_id FROM tarefas t JOIN atividades a ON a.id = t.atividade_id WHERE t.id = $1`, [tarefaId])).rows[0];
   if (!t) throw new HttpError(404, 'Atividade não encontrada');
   if (!pode(user, 'projetos', 'editar') && !pode(user, 'delegadas', 'editar') && (!user.pessoa_id || t.responsavel_id !== user.pessoa_id)) {
     throw new HttpError(403, 'Esta atividade não está mais com você');
@@ -69,6 +69,27 @@ async function aplicarAcao(c, user, a) {
   } else if (a.tipo === 'comentario') {
     await c.query(`INSERT INTO tarefa_eventos (tarefa_id, usuario_id, tipo, detalhe) VALUES ($1,$2,'comentario',$3)`,
       [tarefaId, user.id, v.str(a.texto, 'o comentário', { max: 2000 })]);
+  } else if (a.tipo === 'ativo') {
+    // Patrimônio registrado no campo: fica instalado no endereço da atividade
+    const txt = (x, max) => { const s2 = String(x ?? '').trim(); return s2 ? s2.slice(0, max) : null; };
+    const pat = txt(a.patrimonio, 60), serie = txt(a.numero_serie, 80);
+    if (!pat && !serie) throw new HttpError(400, 'Informe o patrimônio ou o número de série');
+    const e = (await c.query(`SELECT e.id, e.contrato_id FROM enderecos e WHERE e.id = $1`, [t.endereco_id])).rows[0];
+    const itemId = a.item_id ? v.id(a.item_id, 'Item') : null;
+    if (itemId && !(await c.query(`SELECT 1 FROM contrato_itens WHERE id = $1 AND contrato_id = $2`, [itemId, e.contrato_id])).rows.length) throw new HttpError(400, 'Item não é deste contrato');
+    const dia = a.em && !Number.isNaN(Date.parse(a.em)) ? new Date(a.em).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const ja = (await c.query(`SELECT id, contrato_id FROM ativos WHERE ($1::text IS NOT NULL AND lower(patrimonio) = lower($1)) OR ($2::text IS NOT NULL AND lower(numero_serie) = lower($2)) LIMIT 1`, [pat, serie])).rows[0];
+    if (ja && ja.contrato_id !== e.contrato_id) throw new HttpError(400, `Patrimônio/série ${pat || serie} já está em outro contrato`);
+    if (ja) {
+      await c.query(`UPDATE ativos SET endereco_id = $1, item_id = COALESCE($2, item_id), patrimonio = COALESCE($3, patrimonio), numero_serie = COALESCE($4, numero_serie),
+                       fabricante = COALESCE($5, fabricante), modelo = COALESCE($6, modelo), status = 'instalado', instalado_em = $7, atualizado_em = now() WHERE id = $8`,
+        [e.id, itemId, pat, serie, txt(a.fabricante, 80), txt(a.modelo, 80), dia, ja.id]);
+    } else {
+      await c.query(`INSERT INTO ativos (contrato_id, item_id, endereco_id, patrimonio, numero_serie, fabricante, modelo, status, instalado_em) VALUES ($1,$2,$3,$4,$5,$6,$7,'instalado',$8)`,
+        [e.contrato_id, itemId, e.id, pat, serie, txt(a.fabricante, 80), txt(a.modelo, 80), dia]);
+    }
+    await c.query(`INSERT INTO tarefa_eventos (tarefa_id, usuario_id, tipo, detalhe) VALUES ($1,$2,'comentario',$3)`,
+      [tarefaId, user.id, `Patrimônio registrado no app: ${[pat, serie].filter(Boolean).join(' / ')}`]);
   } else {
     throw new HttpError(400, 'Tipo de ação desconhecido');
   }
@@ -81,7 +102,7 @@ module.exports = (app) => {
   app.get('/api/mobile/sync', interno, async (req) => {
     const u = req.user;
     const base = { usuario: { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, pessoa_id: u.pessoa_id, acoes: u.perm ? u.perm.acoes : {} }, servidor_em: new Date().toISOString() };
-    if (!u.pessoa_id) return { ...base, tarefas: [], checklists: {}, respostas: {}, fotos: {} };
+    if (!u.pessoa_id) return { ...base, tarefas: [], checklists: {}, respostas: {}, fotos: {}, patrimonio: {} };
     const tarefas = await db.many(
       `SELECT t.id, t.status, t.prevista_inicio, t.prevista_fim, t.realizada_inicio, t.realizada_fim, t.observacao, t.atualizado_em,
               a.id AS atividade_id, a.nome AS atividade, a.etapa, a.checklist_id, a.evidencia,
@@ -113,7 +134,19 @@ module.exports = (app) => {
     for (const r of resp) (respostas[r.tarefa_id] = respostas[r.tarefa_id] || {})[r.item_id] = { valor: r.valor, ok: r.ok };
     const fotosPor = {};
     for (const f of fotos) (fotosPor[f.tarefa_id] = fotosPor[f.tarefa_id] || []).push(f);
-    return { ...base, tarefas, checklists, respostas, fotos: fotosPor };
+    // Patrimônio dos endereços das atividades: itens controlados (com quantidade) e ativos já registrados
+    const ends = [...new Set(tarefas.map((t) => t.endereco_id))];
+    const patrimonio = {};
+    if (ends.length) {
+      const [pit, pat] = await Promise.all([
+        db.many(`SELECT ei.endereco_id, ci.id, ci.nome, ei.quantidade FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
+                  WHERE ei.endereco_id = ANY($1) AND ci.controla_patrimonio AND ei.quantidade > 0 ORDER BY ci.ordem, ci.id`, [ends]),
+        db.many(`SELECT id, endereco_id, item_id, patrimonio, numero_serie, status FROM ativos WHERE endereco_id = ANY($1) ORDER BY id`, [ends]),
+      ]);
+      for (const i of pit) (patrimonio[i.endereco_id] = patrimonio[i.endereco_id] || { itens: [], ativos: [] }).itens.push({ id: i.id, nome: i.nome, quantidade: i.quantidade });
+      for (const x of pat) if (patrimonio[x.endereco_id]) patrimonio[x.endereco_id].ativos.push(x);
+    }
+    return { ...base, tarefas, checklists, respostas, fotos: fotosPor, patrimonio };
   });
 
   // Fila de ações feitas offline: [{ id(uuid), tipo, tarefa_id, ... }]
@@ -134,7 +167,8 @@ module.exports = (app) => {
         });
         resultados.push({ id, ok: true });
       } catch (e) {
-        if (!(e instanceof HttpError) && !['23514', '22P02', '23503'].includes(e.code)) throw e;
+        if (!(e instanceof HttpError) && !['23514', '22P02', '23503', '23505'].includes(e.code)) throw e;
+        if (e.code === '23505') e.message = 'Patrimônio ou número de série já cadastrado';
         resultados.push({ id, ok: false, erro: e.message });
       }
     }
