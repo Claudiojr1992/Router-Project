@@ -9,6 +9,7 @@ const MODULOS = [
   { id: 'minhas', nome: 'Tarefas · Comigo', grupo: 'Operação', desc: 'As tarefas da própria pessoa (iniciar, pausar, concluir)' },
   { id: 'app', nome: 'App do técnico', grupo: 'Operação', desc: 'Uso do app no celular, com e sem internet' },
   { id: 'faturamento', nome: 'Faturamento', grupo: 'Operação', desc: 'Medições, nota fiscal e recebimento' },
+  { id: 'patrimonio', nome: 'Patrimônio', grupo: 'Operação', desc: 'Ativos com patrimônio e número de série, onde estão e em que situação' },
   { id: 'chat', nome: 'Chat', grupo: 'Operação', desc: 'Conversas, pedidos e ocorrências' },
   { id: 'clientes', nome: 'Projetos · Cadastro e endereços', grupo: 'Cadastros', desc: 'Criar projetos; clientes, contratos, endereços, etapas e equipes' },
   { id: 'empresas', nome: 'Empresas', grupo: 'Cadastros', desc: 'Empresas executoras e parceiras' },
@@ -66,6 +67,10 @@ const ROTAS = [
   ['*', P('/api/perfis(/.*)?'), { GET: ['permissoes:ver', 'usuarios:ver'], default: 'permissoes:editar' }],
   ['*', P('/api/auditoria(/.*)?'), 'auditoria:ver'],
   ['*', P('/api/usuarios(/.*)?'), 'usuarios'],
+  // patrimônio (antes das regras gerais de endereços)
+  ['GET', P('/api/enderecos/[^/]+/ativos'), { any: ['patrimonio:ver', 'clientes:ver'] }],
+  ['DELETE', P('/api/ativos/[^/]+'), ['patrimonio:editar', { acao: 'excluir' }]],
+  ['*', P('/api/ativos(/.*)?'), 'patrimonio'],
   // cadastros
   ['DELETE', P('/api/enderecos/[^/]+'), ['clientes:editar', { acao: 'excluir' }]],
   ['POST', P('/api/enderecos/excluir'), ['clientes:editar', { acao: 'excluir' }]],

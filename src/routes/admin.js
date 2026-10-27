@@ -7,7 +7,7 @@ const perm = require('../permissoes');
 
 const TABELAS = ['clientes', 'contratos', 'contrato_arquivos', 'contrato_itens', 'empresas', 'enderecos', 'etapas', 'equipe_regras', 'atividades', 'checklists',
   'checklist_itens', 'pessoas', 'times', 'time_membros', 'tarefas', 'regras_distribuicao', 'usuarios', 'perfis', 'medicoes', 'medicao_enderecos', 'integracoes',
-  'monitoramento_ativos', 'relatorio_assinaturas'];
+  'monitoramento_ativos', 'relatorio_assinaturas', 'ativos'];
 
 function perfilBody(b, novo) {
   const out = {
@@ -90,6 +90,7 @@ module.exports = (app) => {
                 WHEN 'contratos' THEN (SELECT cl.nome || ' · ' || ct.numero FROM contratos ct JOIN clientes cl ON cl.id = ct.cliente_id WHERE ct.id::text = a.registro_id)
                 WHEN 'usuarios' THEN (SELECT u.nome FROM usuarios u WHERE u.id::text = a.registro_id)
                 WHEN 'empresas' THEN (SELECT x.nome FROM empresas x WHERE x.id::text = a.registro_id)
+                WHEN 'ativos' THEN (SELECT COALESCE(x.patrimonio, x.numero_serie) FROM ativos x WHERE x.id::text = a.registro_id)
                 WHEN 'tarefas' THEN (SELECT at.nome || ' · ' || e.nome FROM tarefas t JOIN atividades at ON at.id = t.atividade_id JOIN enderecos e ON e.id = t.endereco_id WHERE t.id::text = a.registro_id)
                 ELSE NULL END AS registro_nome
          FROM auditoria a ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY a.id DESC LIMIT $${p.length}`, p);
@@ -97,7 +98,7 @@ module.exports = (app) => {
   });
 
   // Histórico de um registro (aparece no próprio cadastro): endereço, contrato ou cliente
-  for (const [rota, tabela] of [['enderecos', 'enderecos'], ['contratos', 'contratos'], ['clientes', 'clientes']]) {
+  for (const [rota, tabela] of [['enderecos', 'enderecos'], ['contratos', 'contratos'], ['clientes', 'clientes'], ['ativos', 'ativos']]) {
     app.get(`/api/${rota}/:id/historico`, logado, async (req) => db.many(
       `SELECT id, criado_em, usuario_nome, ip, acao, antes, depois FROM auditoria WHERE tabela = $1 AND registro_id = $2 ORDER BY id DESC LIMIT 100`,
       [tabela, String(v.id(req.params.id))]));

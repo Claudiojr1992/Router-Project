@@ -24,7 +24,8 @@ const Shell = (() => {
     mini: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 10l-2 2 2 2"/>',
     voltar: '<path d="M15 18l-6-6 6-6"/>',
     emp: '<rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/>',
-  };
+    tag: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+};
   const svg = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[k]}</svg>`;
 
   const ESC = ['admin', 'coordenador', 'supervisor', 'administrativo'];
@@ -41,6 +42,7 @@ const Shell = (() => {
     { key: 'clientes', href: '/app/clientes.html', label: 'Cadastro e endereços', icon: 'cli', mod: 'clientes', grupo: 'projetos' },
     { key: 'tarefas', href: '/app/tarefas.html', label: 'Tarefas', icon: 'minhas', mod: ['minhas', 'delegadas'] },
     { key: 'faturamento', href: '/app/faturamento.html', label: 'Faturamento', icon: 'fat', mod: 'faturamento' },
+    { key: 'patrimonio', href: '/app/patrimonio.html', label: 'Patrimônio', icon: 'tag', mod: 'patrimonio' },
     { key: 'chat', href: '/app/chat.html', label: 'Chat', icon: 'chat', mod: 'chat' },
     { key: 'app', href: '/m/', label: 'App do técnico', icon: 'cel', mod: 'app' },
     // na ordem em que um projeto novo é preparado (clientes e contratos nascem em Projetos → + Novo projeto)

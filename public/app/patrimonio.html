@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patrimônio · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+<script src="/js/planilha.js"></script>
+<script src="/js/historico.js"></script>
+</head>
+<body>
+<script>
+// Patrimônio: cada equipamento controlado (patrimônio / série), onde está e em que situação.
+// Itens marcados como "Patrimônio" no contrato mostram aqui quanto falta cadastrar e instalar.
+const ST = { estoque: ['Em estoque', 'var(--muted)'], em_transporte: ['Em transporte', 'var(--info)'], instalado: ['Instalado', 'var(--ok)'], manutencao: ['Em manutenção', 'var(--warn)'], baixado: ['Baixado', 'var(--err)'] };
+let S, contratos = [], ct = null, op = { itens: [], enderecos: [] }, ativos = [], resumo = null;
+let fStatus = '', fItem = '', fEnd = '', q = '', sel = new Set();
+const editar = () => Shell.pode('patrimonio', 'editar');
+const pill = (s) => `<span class="pill" style="color:${ST[s][1]}"><i></i>${ST[s][0]}</span>`;
+const nomeEnd = (e) => `${e.codigo ? e.codigo + ' · ' : ''}${e.nome} (${e.municipio}/${e.uf})`;
+
+(async () => {
+  S = await Shell.init({ key: 'patrimonio', title: 'Patrimônio', sub: 'Equipamentos com patrimônio e número de série: onde estão e em que situação' });
+  contratos = await RP.api('/ativos/contratos');
+  if (!contratos.length) { S.content.innerHTML = '<div class="card empty">Nenhum contrato ativo. Crie um projeto em Projetos.</div>'; return; }
+  const qs = new URLSearchParams(location.search);
+  const pedido = +qs.get('contrato');
+  fEnd = qs.get('endereco') || '';
+  let lem = null; try { lem = +localStorage.getItem('rp-pat-ct'); } catch (_) { /* sem armazenamento */ }
+  await abrir((contratos.find((c) => c.id === pedido) || contratos.find((c) => c.id === lem) || contratos[0]).id);
+})();
+
+async function abrir(id) {
+  ct = contratos.find((c) => c.id === id);
+  try { localStorage.setItem('rp-pat-ct', String(id)); } catch (_) { /* sem armazenamento */ }
+  [op, resumo] = await Promise.all([RP.api('/ativos/opcoes?contrato=' + id), RP.api('/ativos/resumo?contrato=' + id)]);
+  sel.clear();
+  await carregar();
+}
+async function carregar() {
+  ativos = await RP.api('/ativos?contrato=' + ct.id);
+  history.replaceState(null, '', `/app/patrimonio.html?contrato=${ct.id}${fEnd ? '&endereco=' + fEnd : ''}`);
+  render();
+}
+
+function render() {
+  S.actions.innerHTML = editar() ? '<button class="btn sm" id="imp">Importar planilha</button><button class="btn sm" id="exp">Exportar</button><button class="btn sm primary" id="novo">+ Ativo</button>' : '<button class="btn sm" id="exp">Exportar</button>';
+  RP.$('#novo')?.addEventListener('click', () => ativo(null));
+  RP.$('#imp')?.addEventListener('click', importar);
+  RP.$('#exp').onclick = exportar;
+  const lq = q.trim().toLowerCase();
+  const vis = ativos.filter((a) => (!fStatus || a.status === fStatus) && (!fItem || String(a.item_id) === fItem) && (!fEnd || String(a.endereco_id) === fEnd)
+    && (!lq || [a.patrimonio, a.numero_serie, a.modelo, a.fabricante, a.endereco, a.endereco_codigo, a.mac, a.ip].join(' ').toLowerCase().includes(lq)));
+  const ctrl = resumo.itens.filter((i) => i.controla_patrimonio || i.cadastrados);
+  const n = (s) => ativos.filter((a) => a.status === s).length;
+  S.content.innerHTML = `
+    <div class="toolbar" style="padding:0">
+      <select class="input" id="ct" style="max-width:340px" aria-label="Contrato">${contratos.map((c) => `<option value="${c.id}" ${c.id === ct.id ? 'selected' : ''}>${RP.esc(c.cliente)} · ${RP.esc(c.numero)}</option>`).join('')}</select>
+      ${ct.exige_patrimonio ? '<span class="pill" title="O endereço só fica apto a faturar com todo o patrimônio instalado">Exige patrimônio para faturar</span>' : ''}
+    </div>
+    ${ctrl.length ? `<div class="patgrid">${ctrl.map((i) => { const pc = i.previsto ? Math.min(100, Math.round(i.instalados / i.previsto * 100)) : 0;
+      return `<button type="button" class="card patcard ${fItem === String(i.id) ? 'on' : ''}" data-item="${i.id}" title="Filtrar por ${RP.esc(i.nome)}"><b>${RP.esc(i.nome)}</b>
+        <span><b>${RP.fmtN(i.instalados)}</b> de ${RP.fmtN(i.previsto)} instalados com patrimônio</span><div class="pjbar"><i style="width:${pc}%"></i></div>
+        <small class="muted">${RP.fmtN(i.cadastrados)} cadastrado(s)${i.previsto > i.instalados ? ` · faltam ${RP.fmtN(i.previsto - i.instalados)}` : ''}</small></button>`; }).join('')}</div>`
+      : '<div class="alert info" style="margin:0">Nenhum item com patrimônio neste contrato. Em <b>Cadastro e endereços → Contratos → Itens e preços</b>, marque “Patrimônio” nos itens que têm número de patrimônio ou de série.</div>'}
+    <div class="card">
+      <div class="vtabs" role="tablist" style="padding:12px 16px 0;margin:0">${[['', `Todos (${ativos.length})`], ...Object.entries(ST).map(([k, v]) => [k, `${v[0]} (${n(k)})`])].map(([k, t]) => `<button type="button" role="tab" class="eqc" data-st="${k}" aria-pressed="${fStatus === k}">${t}</button>`).join('')}</div>
+      <div class="toolbar" style="padding:12px 16px">
+        <input class="input" id="q" placeholder="Buscar patrimônio, série, modelo, MAC, endereço" value="${RP.esc(q)}" aria-label="Buscar" style="max-width:320px">
+        <select class="input" id="fi" style="max-width:200px" aria-label="Item"><option value="">Todos os itens</option>${op.itens.map((i) => `<option value="${i.id}" ${String(i.id) === fItem ? 'selected' : ''}>${RP.esc(i.nome)}</option>`).join('')}</select>
+        <select class="input" id="fe" style="max-width:280px" aria-label="Endereço"><option value="">Todos os endereços</option>${op.enderecos.map((e) => `<option value="${e.id}" ${String(e.id) === fEnd ? 'selected' : ''}>${RP.esc(nomeEnd(e))}</option>`).join('')}</select>
+        <span class="spacer"></span>
+        ${editar() && sel.size ? `<button class="btn sm primary" id="mov">Mover ${sel.size} selecionado(s)</button>` : `<span class="muted">${vis.length} ativo(s)</span>`}
+      </div>
+      ${vis.length ? `<div class="scroll" style="max-height:calc(100vh - 380px)"><table class="tbl"><thead><tr>${editar() ? `<th style="width:30px"><input type="checkbox" id="all" aria-label="Selecionar todos" ${vis.length && vis.every((a) => sel.has(a.id)) ? 'checked' : ''}></th>` : ''}<th>Patrimônio</th><th>Nº de série</th><th>Item</th><th>Fabricante / modelo</th><th>Endereço</th><th>Situação</th><th>Instalado em</th></tr></thead>
+        <tbody>${vis.slice(0, 1000).map((a) => `<tr class="click" data-id="${a.id}">${editar() ? `<td><input type="checkbox" class="sel" value="${a.id}" ${sel.has(a.id) ? 'checked' : ''} aria-label="Selecionar ${RP.esc(a.patrimonio || a.numero_serie)}"></td>` : ''}
+          <td><b>${RP.esc(a.patrimonio || '—')}</b></td><td>${RP.esc(a.numero_serie || '—')}</td><td>${RP.esc(a.item || '—')}</td><td>${RP.esc([a.fabricante, a.modelo].filter(Boolean).join(' ') || '—')}</td>
+          <td>${a.endereco ? `${RP.esc(a.endereco)}<div class="muted" style="font-size:.8rem">${RP.esc(a.municipio)}/${a.uf}</div>` : '<span class="muted">—</span>'}</td><td>${pill(a.status)}</td><td>${RP.fmtData(a.instalado_em) || '—'}</td></tr>`).join('')}</tbody></table>
+        ${vis.length > 1000 ? '<div class="muted" style="padding:10px 16px">Mostrando 1.000. Use a busca ou os filtros.</div>' : ''}</div>`
+        : `<div class="empty">${ativos.length ? 'Nenhum ativo neste filtro.' : 'Nenhum ativo cadastrado neste contrato. Use “+ Ativo” ou “Importar planilha”.'}</div>`}
+    </div>`;
+  RP.$('#ct').onchange = (e) => { fItem = ''; fEnd = ''; abrir(+e.target.value); };
+  const q$ = RP.$('#q'); q$.oninput = () => { q = q$.value; clearTimeout(q$._t); q$._t = setTimeout(() => { render(); RP.$('#q').focus(); }, 250); };
+  RP.$('#fi').onchange = (e) => { fItem = e.target.value; render(); };
+  RP.$('#fe').onchange = (e) => { fEnd = e.target.value; history.replaceState(null, '', `/app/patrimonio.html?contrato=${ct.id}${fEnd ? '&endereco=' + fEnd : ''}`); render(); };
+  RP.$$('[data-st]').forEach((b) => (b.onclick = () => { fStatus = b.dataset.st; render(); }));
+  RP.$$('[data-item]').forEach((b) => (b.onclick = () => { fItem = fItem === b.dataset.item ? '' : b.dataset.item; render(); }));
+  RP.$$('.sel').forEach((c) => { c.onclick = (e) => e.stopPropagation(); c.onchange = () => { if (c.checked) sel.add(+c.value); else sel.delete(+c.value); render(); }; });
+  RP.$('#all')?.addEventListener('change', (e) => { vis.forEach((a) => (e.target.checked ? sel.add(a.id) : sel.delete(a.id))); render(); });
+  RP.$('#mov')?.addEventListener('click', mover);
+  RP.$$('tr.click').forEach((r) => (r.onclick = () => ativo(ativos.find((a) => a.id === +r.dataset.id))));
+}
+
+const campo = (id, label, v = '', extra = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${RP.esc(v ?? '')}" ${extra}></div>`;
+const optEnd = (atual) => `<option value="">Sem endereço (estoque)</option>${op.enderecos.map((e) => `<option value="${e.id}" ${e.id === atual ? 'selected' : ''}>${RP.esc(nomeEnd(e))}</option>`).join('')}`;
+
+function ativo(a) {
+  const x = a || { status: fEnd ? 'instalado' : 'estoque', endereco_id: fEnd ? +fEnd : null, item_id: fItem ? +fItem : (op.itens.find((i) => i.controla_patrimonio) || {}).id };
+  const ro = editar() ? '' : 'disabled';
+  const d = RP.drawer(a ? `Ativo ${a.patrimonio || a.numero_serie}` : 'Novo ativo', `
+    ${a ? '<div class="row" style="justify-content:flex-end;margin:-4px 0 6px"><button type="button" class="btn sm" id="a-hist">Histórico de alterações</button></div>' : ''}
+    <div class="row"><div style="flex:1">${campo('a-pat', 'Patrimônio', x.patrimonio, ro)}</div><div style="flex:1">${campo('a-ser', 'Número de série', x.numero_serie, ro)}</div></div>
+    <small class="muted" style="display:block;margin:-8px 0 12px">Informe pelo menos um dos dois. Não podem se repetir em todo o sistema.</small>
+    <div class="field"><label for="a-it">Item do contrato</label><select class="input" id="a-it" ${ro}><option value="">Sem item</option>${op.itens.map((i) => `<option value="${i.id}" ${i.id === x.item_id ? 'selected' : ''}>${RP.esc(i.nome)}${i.controla_patrimonio ? '' : ' (não controla patrimônio)'}</option>`).join('')}</select></div>
+    <div class="row"><div style="flex:1">${campo('a-fab', 'Fabricante', x.fabricante, ro)}</div><div style="flex:1">${campo('a-mod', 'Modelo', x.modelo, ro)}</div></div>
+    <div class="row"><div style="flex:1">${campo('a-mac', 'MAC', x.mac, ro)}</div><div style="flex:1">${campo('a-ip', 'IP', x.ip, ro)}</div></div>
+    <div class="row"><div class="field" style="flex:1"><label for="a-st">Situação</label><select class="input" id="a-st" ${ro}>${Object.entries(ST).map(([k, v]) => `<option value="${k}" ${k === x.status ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></div>
+      <div style="flex:1">${campo('a-ins', 'Instalado em', x.instalado_em ? String(x.instalado_em).slice(0, 10) : '', 'type="date" ' + ro)}</div></div>
+    <div class="field"><label for="a-end">Endereço</label><select class="input" id="a-end" ${ro}>${optEnd(x.endereco_id)}</select><small>Instalado precisa de endereço. É o que conta no faturamento quando o contrato exige patrimônio.</small></div>
+    ${campo('a-gar', 'Garantia até', x.garantia_ate ? String(x.garantia_ate).slice(0, 10) : '', 'type="date" ' + ro)}
+    <div class="field"><label for="a-obs">Observação</label><textarea class="input" id="a-obs" ${ro}>${RP.esc(x.observacao || '')}</textarea></div>
+    ${a && editar() && Shell.acao('excluir') ? '<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px"><button class="btn sm danger" type="button" id="a-del">Excluir ativo</button> <span class="muted" style="font-size:.82rem">Para tirar de uso, prefira a situação “Baixado” (mantém o histórico).</span></div>' : ''}`,
+  editar() ? { onSave: async (el) => {
+    const v = (id) => RP.$('#' + id, el).value;
+    const body = { contrato_id: ct.id, patrimonio: v('a-pat'), numero_serie: v('a-ser'), item_id: v('a-it') || null, fabricante: v('a-fab'), modelo: v('a-mod'), mac: v('a-mac'), ip: v('a-ip'),
+      status: v('a-st'), instalado_em: v('a-ins'), endereco_id: v('a-end') || null, garantia_ate: v('a-gar'), observacao: v('a-obs') };
+    if (a) await RP.api('/ativos/' + a.id, { method: 'PUT', body }); else await RP.api('/ativos', { method: 'POST', body });
+    RP.toast('Ativo salvo'); await abrir(ct.id);
+  } } : {});
+  RP.$('#a-hist', d.el)?.addEventListener('click', () => RPH.abrir(`Histórico · ${a.patrimonio || a.numero_serie}`, `/ativos/${a.id}/historico`));
+  RP.$('#a-del', d.el)?.addEventListener('click', async () => {
+    if (!confirm('Excluir este ativo? Ele some do patrimônio (o histórico fica na auditoria).')) return;
+    try { await RP.api('/ativos/' + a.id, { method: 'DELETE' }); RP.toast('Ativo excluído'); d.close(); await abrir(ct.id); } catch (e) { RP.toast(e.message); }
+  });
+  const st = RP.$('#a-st', d.el), en = RP.$('#a-end', d.el);
+  if (st) st.onchange = () => { if (st.value === 'instalado' && !en.value) en.focus(); };
+}
+
+function mover() {
+  RP.drawer(`Mover ${sel.size} ativo(s)`, `
+    <div class="field"><label for="m-st">Nova situação</label><select class="input" id="m-st">${Object.entries(ST).map(([k, v]) => `<option value="${k}" ${k === 'instalado' ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></div>
+    <div class="field"><label for="m-end">Endereço</label><select class="input" id="m-end"><option value="">Manter o endereço atual</option>${op.enderecos.map((e) => `<option value="${e.id}" ${String(e.id) === fEnd ? 'selected' : ''}>${RP.esc(nomeEnd(e))}</option>`).join('')}</select>
+      <small>“Em estoque” e “Baixado” sem endereço escolhido tiram o ativo do endereço.</small></div>`, {
+    saveLabel: 'Mover',
+    onSave: async (el) => {
+      const r = await RP.api('/ativos/mover', { method: 'POST', body: { ids: [...sel], status: RP.$('#m-st', el).value, endereco_id: RP.$('#m-end', el).value || null } });
+      RP.toast(`${r.alterados} ativo(s) atualizado(s)`); sel.clear(); await abrir(ct.id);
+    },
+  });
+}
+
+// ---------- Planilha ----------
+const COLS = { patrimonio: ['patrimonio', 'patrimônio', 'plaqueta', 'tombo'], numero_serie: ['serie', 'série', 'numero de serie', 'número de série', 'serial', 'sn', 'n serie', 'nº de série'],
+  item: ['item', 'equipamento', 'tipo'], fabricante: ['fabricante', 'marca'], modelo: ['modelo'], mac: ['mac', 'endereco mac'], ip: ['ip', 'endereco ip'],
+  endereco: ['endereco', 'endereço', 'codigo', 'código', 'agencia', 'agência', 'unidade', 'local'], status: ['situacao', 'situação', 'status'] };
+const norm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+function lerLinhas(cel) {
+  if (!cel.length) return { linhas: [], cab: [] };
+  const cab = cel[0].map((c) => String(c || '').trim());
+  const idx = Object.fromEntries(Object.entries(COLS).map(([k, al]) => [k, cab.findIndex((c) => al.map(norm).includes(norm(c)))]));
+  const linhas = cel.slice(1).filter((r) => r.some((c) => String(c || '').trim())).map((r) => Object.fromEntries(Object.entries(idx).map(([k, i]) => [k, i >= 0 ? String(r[i] ?? '').trim() : ''])));
+  return { linhas, cab };
+}
+const MODELO = ['Patrimônio', 'Número de série', 'Item', 'Fabricante', 'Modelo', 'MAC', 'IP', 'Endereço', 'Situação'];
+function importar() {
+  let doArquivo = null;
+  const d = RP.drawer('Importar ativos', `
+    <p class="muted" style="margin-top:0">Contrato <b style="color:var(--ink)">${RP.esc(ct.cliente)} · ${RP.esc(ct.numero)}</b>. Patrimônio ou série já cadastrados são <b>atualizados</b>; os outros são criados.</p>
+    <div class="row" style="gap:8px;margin-bottom:12px"><button class="btn sm" type="button" id="mod">Baixar modelo (.xlsx)</button></div>
+    <div class="field"><label for="i-f">Arquivo (.xlsx ou .csv)</label><input class="input" type="file" id="i-f" accept=".xlsx,.csv"></div>
+    <div class="field"><label for="i-t">ou cole as linhas copiadas do Excel</label><textarea class="input" id="i-t" style="min-height:140px;font-family:monospace;font-size:.85rem" placeholder="Patrimônio&#9;Número de série&#9;Item&#9;Endereço&#10;BNB-000123&#9;SN998877&#9;Câmera&#9;011"></textarea>
+      <small>Colunas: ${MODELO.join(', ')}. <b>Item</b> = nome do item no contrato. <b>Endereço</b> = código ou nome do endereço (com endereço, a situação padrão é Instalado; sem, Em estoque). <b>Situação</b>: estoque, transporte, instalado, manutenção ou baixado.</small></div>
+    <div id="i-p" class="muted"></div>`, {
+    saveLabel: 'Importar',
+    onSave: async (el) => {
+      const { linhas } = doArquivo ? lerLinhas(doArquivo) : lerLinhas(Planilha.lerCsv(RP.$('#i-t', el).value));
+      if (!linhas.length) throw new Error('Escolha um arquivo ou cole pelo menos uma linha com cabeçalho');
+      const r = await RP.api('/ativos/lote', { method: 'POST', body: { contrato_id: ct.id, linhas } });
+      RP.toast(`${r.novos} criado(s), ${r.atualizados} atualizado(s)${r.erros.length ? `, ${r.erros.length} com erro` : ''}`);
+      if (r.erros.length) alert('Linhas não importadas:\n' + r.erros.slice(0, 30).join('\n'));
+      await abrir(ct.id);
+    },
+  });
+  const t = RP.$('#i-t', d.el), f = RP.$('#i-f', d.el), p = RP.$('#i-p', d.el);
+  const previa = ({ linhas, cab }) => { p.innerHTML = linhas.length ? `<b style="color:var(--ink)">${linhas.length} linha(s)</b> · colunas: ${RP.esc(cab.join(', '))}` : ''; };
+  t.oninput = () => { doArquivo = null; f.value = ''; previa(lerLinhas(Planilha.lerCsv(t.value))); };
+  f.onchange = async () => { if (!f.files[0]) return; try { doArquivo = await Planilha.ler(f.files[0]); t.value = ''; previa(lerLinhas(doArquivo)); } catch (e) { doArquivo = null; RP.showAlert(d.el.querySelector('.alert'), 'err', e.message); } };
+  RP.$('#mod', d.el).onclick = () => Planilha.baixar(Planilha.xlsx([{ nome: 'Ativos', linhas: [MODELO, ['BNB-000123', 'SN998877', (op.itens[0] || {}).nome || 'Câmera', 'Intelbras', 'VIP 3230', '', '', (op.enderecos[0] || {}).codigo || '', 'instalado']], larguras: [16, 18, 16, 14, 14, 18, 14, 18, 12] }]), 'Modelo_patrimonio.xlsx');
+}
+function exportar() {
+  const linhas = [MODELO.concat(['Município', 'UF', 'Instalado em', 'Garantia até']), ...ativos.map((a) => [a.patrimonio || '', a.numero_serie || '', a.item || '', a.fabricante || '', a.modelo || '', a.mac || '', a.ip || '',
+    a.endereco_codigo || a.endereco || '', ST[a.status][0], a.municipio || '', a.uf || '', a.instalado_em ? String(a.instalado_em).slice(0, 10) : '', a.garantia_ate ? String(a.garantia_ate).slice(0, 10) : ''])];
+  Planilha.baixar(Planilha.xlsx([{ nome: 'Patrimônio', linhas, larguras: [16, 18, 16, 14, 14, 18, 14, 22, 14, 18, 6, 12, 12] }]), `Patrimonio_${ct.cliente}_${ct.numero}.xlsx`.replace(/[^A-Za-z0-9._-]+/g, '_'));
+}
+</script>
+</body>
+</html>

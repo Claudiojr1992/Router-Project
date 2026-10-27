@@ -4,6 +4,7 @@ const v = require('../validate');
 const { HttpError } = require('../http');
 const { requer, GESTAO, ESCRITORIO, INTERNOS } = require('../auth');
 const { validarItens, garantirItem, salvarItensEndereco } = require('../itens');
+const { VALOR } = require('./faturamento');
 const { aplicarEtapa, garantirEtapa, parseData, validarData, clienteDoContrato } = require('../etapas');
 const { aplicarPlano, parseNaRota, ajustarEquipes, parseEquipe, parseDia, MAX_EQUIPES, carregarRegras, validarRegras, recalcularPrevisao } = require('../plano');
 
@@ -34,6 +35,7 @@ function contratoBody(b) {
     v.oneOf(b.regra_cobranca || 'apos_validacao', 'Regra de cobrança', ['apos_validacao', 'apos_handover']),
     v.oneOf(b.status || 'ativo', 'Status', ['ativo', 'encerrado', 'suspenso']),
     b.empresa_id ? v.id(b.empresa_id, 'Empresa') : null,
+    b.exige_patrimonio === true,
   ];
 }
 
@@ -151,6 +153,19 @@ async function copiarPadrao(c, contrato) {
                  WHERE e.contrato_id = $1 AND a.ativo ON CONFLICT DO NOTHING`, [contrato]);
 }
 
+// Preço, se é faturável e se controla patrimônio, por nome do item (vindos da tela do contrato)
+async function gravarPrecos(c, contrato, lista) {
+  if (!Array.isArray(lista)) return;
+  for (const it of lista) {
+    const nome = String((it && it.nome) || '').trim().replace(/\s+/g, ' ');
+    if (!nome || it.valor_unitario === undefined && it.faturavel === undefined && it.controla_patrimonio === undefined) continue;
+    const preco = it.valor_unitario === '' || it.valor_unitario == null ? null : v.num(String(it.valor_unitario).replace(',', '.'), `O valor de "${nome}"`, { min: 0 });
+    await c.query(`UPDATE contrato_itens SET valor_unitario = $1, faturavel = $2, controla_patrimonio = $3, unidade = COALESCE(NULLIF($4, ''), unidade)
+                    WHERE contrato_id = $5 AND lower(nome) = lower($6)`,
+      [preco, it.faturavel === true || (it.faturavel === undefined && preco != null), it.controla_patrimonio === true, String(it.unidade || '').slice(0, 12), contrato, nome]);
+  }
+}
+
 module.exports = (app) => {
   const leitura = requer(INTERNOS);
   const escrita = requer(ESCRITORIO);
@@ -206,10 +221,11 @@ module.exports = (app) => {
   // ---------- Contratos ----------
   app.post('/api/clientes/:id/contratos', escrita, async (req) => db.tx(async (c) => {
     const ct = (await c.query(
-      `INSERT INTO contratos (cliente_id, numero, tipo, objeto, vigencia_inicio, vigencia_fim, valor_camera, valor_endereco, regra_cobranca, status, empresa_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [v.id(req.params.id), ...contratoBody(req.body)])).rows[0];
+      `INSERT INTO contratos (cliente_id, numero, tipo, objeto, vigencia_inicio, vigencia_fim, valor_camera, valor_endereco, regra_cobranca, status, empresa_id, exige_patrimonio)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`, [v.id(req.params.id), ...contratoBody(req.body)])).rows[0];
     const itens = validarItens(req.body.itens) || [];
     for (const it of itens) await garantirItem(c, ct.id, it.nome);
+    await gravarPrecos(c, ct.id, req.body.itens);
     if (req.body.atividades_padrao !== false) await copiarPadrao(c, ct.id); // um passo a menos: já nasce com as atividades
     return ct;
   }));
@@ -217,7 +233,7 @@ module.exports = (app) => {
   app.put('/api/contratos/:id', escrita, async (req) => {
     const r = await db.one(
       `UPDATE contratos SET numero=$1, tipo=$2, objeto=$3, vigencia_inicio=$4, vigencia_fim=$5, valor_camera=$6, valor_endereco=$7,
-              regra_cobranca=$8, status=$9, empresa_id=$10 WHERE id = $11 RETURNING *`, [...contratoBody(req.body), v.id(req.params.id)]);
+              regra_cobranca=$8, status=$9, empresa_id=$10, exige_patrimonio=$11 WHERE id = $12 RETURNING *`, [...contratoBody(req.body), v.id(req.params.id)]);
     if (!r) throw new HttpError(404, 'Contrato não encontrado');
     return r;
   });
@@ -257,7 +273,8 @@ module.exports = (app) => {
   // ---------- Endereços ----------
   // Itens do projeto (catálogo de equipamentos do contrato)
   app.get('/api/contratos/:id/itens', leitura, async (req) => db.many(
-    `SELECT ci.id, ci.nome, ci.unidade, ci.ordem, COALESCE(sum(ei.quantidade),0)::int AS total, count(ei.endereco_id)::int AS enderecos
+    `SELECT ci.id, ci.nome, ci.unidade, ci.ordem, ci.faturavel, ci.valor_unitario::float AS valor_unitario, ci.controla_patrimonio,
+            COALESCE(sum(ei.quantidade),0)::int AS total, count(ei.endereco_id)::int AS enderecos
        FROM contrato_itens ci LEFT JOIN endereco_itens ei ON ei.item_id = ci.id
       WHERE ci.contrato_id = $1 GROUP BY ci.id ORDER BY ci.ordem, ci.id`, [v.id(req.params.id)]));
 
@@ -271,14 +288,16 @@ module.exports = (app) => {
       manter.push(id);
     }
     await c.query(`DELETE FROM contrato_itens WHERE contrato_id = $1 AND NOT (id = ANY($2::bigint[]))`, [contrato, manter]);
+    await gravarPrecos(c, contrato, req.body.itens);
     return { ok: true };
   }));
 
   app.get('/api/contratos/:id/enderecos', leitura, async (req) => db.many(
     `SELECT e.*, COALESCE((SELECT json_agg(json_build_object('item_id', ci.id, 'nome', ci.nome, 'quantidade', ei.quantidade) ORDER BY ci.ordem, ci.id)
                              FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id WHERE ei.endereco_id = e.id), '[]') AS itens
-              , et.nome AS etapa, et.data_inicio AS etapa_inicio
-       FROM enderecos e LEFT JOIN etapas et ON et.id = e.etapa_id WHERE e.contrato_id = $1 ORDER BY e.uf, e.municipio, e.nome`, [v.id(req.params.id)]));
+              , et.nome AS etapa, et.data_inicio AS etapa_inicio, ${VALOR}::float AS valor,
+              (SELECT count(*)::int FROM ativos a WHERE a.endereco_id = e.id AND a.status = 'instalado') AS ativos
+       FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id LEFT JOIN etapas et ON et.id = e.etapa_id WHERE e.contrato_id = $1 ORDER BY e.uf, e.municipio, e.nome`, [v.id(req.params.id)]));
 
   // Etapas do cliente (cada uma com data de início; os endereços ligados a ela são atacados naquele mês)
   app.get('/api/clientes/:id/etapas', leitura, async (req) => db.many(

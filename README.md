@@ -597,6 +597,17 @@ As abas aparecem conforme as permissões de cada perfil. As URLs antigas (`/app/
 
 As ações menos usadas da lista de endereços (alterar ou excluir os listados, colunas por item, itens do projeto, exportar) ficam em **Mais ações**.
 
+## Faturamento por item e patrimônio
+
+**Itens e preços do contrato** (Cadastro e endereços → Contratos → Itens e preços, ou no "+ Novo projeto"): cada item tem unidade, **valor unitário**, se **fatura** e se controla **patrimônio**. O contrato ainda pode ter uma **taxa fixa por endereço** e a opção **Exigir patrimônio para faturar**.
+
+- **Valor do endereço** = Σ (quantidade do item no endereço × valor unitário dos itens que faturam) + taxa fixa. Aparece na lista de endereços e no endereço ("Valor previsto"; com data de conclusão, "Valor gerado").
+- **Ao concluir** o endereço (e passar da etapa da regra de cobrança), ele fica **apto** em Faturamento com o valor e a composição. Se o contrato exige patrimônio, só fica apto quando cada item controlado tem ativos **instalados** no endereço em número igual à quantidade.
+- **Medição** grava o detalhe por item (`medicao_itens`): se o preço mudar depois, a medição não muda. A planilha da medição traz as abas Medição, Resumo por item e Detalhe.
+- O antigo "valor por câmera" virou o preço do item Câmera (migração 016).
+
+**Patrimônio** (menu Operação, permissão *Patrimônio*): ativos com patrimônio e/ou número de série (únicos no sistema), item, fabricante, modelo, MAC, IP, endereço e situação (estoque, em transporte, instalado, em manutenção, baixado). Cards por item mostram quanto falta cadastrar/instalar; dá para importar planilha (atualiza pelo patrimônio/série), exportar, mover vários de uma vez e ver o histórico (auditoria). O endereço mostra os ativos dele e a contagem por item.
+
 ## Vercel + Supabase
 
 O mesmo código roda no Vercel como uma função só (`api/index.js`), com o banco no Supabase.

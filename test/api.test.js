@@ -61,6 +61,35 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     assert.equal((await admin.get(`/api/contratos/${sem.json.id}/preparacao`)).json.atividades, 0);
   });
 
+  await t.test('faturamento por item: valor ao concluir, patrimônio exigido e medição com detalhe', async () => {
+    const c = await admin.post(`/api/clientes/${cli.id}/contratos`, { numero: 'F-' + sufixo, tipo: 'aditivo', valor_endereco: 50, exige_patrimonio: true, atividades_padrao: false,
+      itens: [{ nome: 'Câmera', faturavel: true, valor_unitario: '100', controla_patrimonio: true }, { nome: 'Cabo', faturavel: false }] });
+    assert.equal(c.status, 200, JSON.stringify(c.json));
+    const fct = c.json.id;
+    const e = (await admin.post(`/api/contratos/${fct}/enderecos`, { nome: 'Agência Fat', municipio: 'Fortaleza', uf: 'CE', cameras: 2, itens: [{ nome: 'Câmera', quantidade: 2 }, { nome: 'Cabo', quantidade: 30 }] })).json;
+    assert.ok(e.id, JSON.stringify(e));
+    const lista = (await admin.get(`/api/contratos/${fct}/enderecos`)).json;
+    assert.ok(Array.isArray(lista), JSON.stringify(lista));
+    assert.equal(lista.find((x) => x.id === e.id).valor, 250, 'previsto: 2 × 100 + taxa 50 (cabo não é faturável)');
+    await admin.post(`/api/enderecos/${e.id}/conclusao`, { data: new Date().toISOString().slice(0, 10) });
+    let f = (await admin.get('/api/faturamento/contratos/' + fct)).json;
+    assert.equal(f.aptos.length, 0, 'sem patrimônio não fica apto');
+    assert.equal(f.pendentes_patrimonio.length, 1);
+    const cam = f.itens.find((i) => i.nome === 'Câmera');
+    for (const n of [1, 2]) assert.equal((await admin.post('/api/ativos', { contrato_id: fct, item_id: cam.id, endereco_id: e.id, patrimonio: `P${sufixo}-${n}`, status: 'instalado' })).status, 200);
+    assert.equal((await admin.post('/api/ativos', { contrato_id: fct, patrimonio: `P${sufixo}-1` })).status, 409, 'patrimônio repetido');
+    f = (await admin.get('/api/faturamento/contratos/' + fct)).json;
+    assert.equal(f.aptos.length, 1);
+    assert.equal(f.aptos[0].valor, 250);
+    const m = await admin.post(`/api/faturamento/contratos/${fct}/medicoes`, { competencia: new Date().toISOString().slice(0, 7), endereco_ids: [e.id] });
+    assert.equal(m.status, 200, JSON.stringify(m.json));
+    const md = (await admin.get('/api/medicoes/' + m.json.id)).json;
+    assert.equal(md.valor_total, 250);
+    assert.deepEqual(md.resumo.map((r) => [r.item, r.quantidade, r.total]), [['Câmera', 2, 200], ['Taxa por endereço', 1, 50]]);
+    const imp = (await admin.post('/api/ativos/lote', { contrato_id: fct, linhas: [{ patrimonio: `P${sufixo}-3`, item: 'Câmera' }, { patrimonio: `P${sufixo}-4`, item: 'Inexistente' }] })).json;
+    assert.equal(imp.novos, 1); assert.equal(imp.erros.length, 1);
+  });
+
   await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
     const r = await admin.put('/api/enderecos/' + end.id, { nome: 'Agência Teste', logradouro: 'Rua Nova, 10', municipio: 'Fortaleza', uf: 'CE', cameras: 6 });
     assert.equal(r.status, 200);

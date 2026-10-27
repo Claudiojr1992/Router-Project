@@ -28,6 +28,7 @@ const COR_EQ = ['#2F6FD0', '#D9622B', '#22955F', '#B0399A', '#B88A0A', '#14909F'
 const corEq = (t) => COR_EQ[(t - 1) % 8];
 const hoje = () => new Date().toLocaleDateString('sv');
 const PRE_EXEC = ['A iniciar', 'Configurado', 'Em transporte', 'Material entregue'];
+const STATUS_AT = { estoque: 'Em estoque', em_transporte: 'Em transporte', instalado: 'Instalado', manutencao: 'Em manutenção', baixado: 'Baixado' };
 const concluido = (e) => !!e.concluido_em;
 // Atrasado: devia ter começado (início previsto já passou) e ainda não entrou em execução
 const atrasado = (e) => !concluido(e) && e.inicio_previsto && String(e.inicio_previsto).slice(0, 10) < hoje() && PRE_EXEC.includes(e.status);
@@ -51,6 +52,41 @@ function editorItens(el, linhas, comQtd = true) {
   RP.$('.itadd', el).onclick = () => { box.insertAdjacentHTML('beforeend', linhaItem({}, comQtd)); bind(); box.lastElementChild.querySelector('.it-n').focus(); };
   bind();
 }
+// "1.200,50" → 1200.50 · "420.5" → 420.5 · vazio → null
+const dinheiro = (t) => { let x = String(t || '').replace(/[R$\s]/g, ''); if (!x) return null; if (x.includes(',')) x = x.replace(/\./g, '').replace(',', '.'); return x; };
+const R$ = (n) => (+n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const ctAtual = () => cli && cli.contratos.find((c) => c.id === contratoSel);
+// Valor de um endereço: itens faturáveis do contrato × quantidades + taxa fixa por endereço
+function valorDe(itens, ct = ctAtual()) {
+  const partes = []; let total = 0;
+  for (const it of itens || []) {
+    const c = itensCt.find((x) => normTxt(x.nome) === normTxt(it.nome));
+    if (!c || !c.faturavel || c.valor_unitario == null || !(+it.quantidade > 0)) continue;
+    const t = +it.quantidade * c.valor_unitario; total += t; partes.push(`${RP.esc(c.nome)} ${it.quantidade} × ${R$(c.valor_unitario)}`);
+  }
+  if (ct && +ct.valor_endereco > 0) { total += +ct.valor_endereco; partes.push(`taxa ${R$(ct.valor_endereco)}`); }
+  return { total, partes };
+}
+// Editor da tabela de preços do contrato: item, unidade, faturável, valor unitário, controla patrimônio
+function linhaPreco(it = {}) {
+  return `<div class="prrow"><input class="input pr-n" list="dl-itens" placeholder="Ex.: Câmera" value="${RP.esc(it.nome || '')}" aria-label="Item">
+    <input class="input pr-u" placeholder="un" value="${RP.esc(it.unidade || 'un')}" aria-label="Unidade" maxlength="12">
+    <input class="input pr-v" inputmode="decimal" placeholder="R$ 0,00" value="${it.valor_unitario != null ? String(it.valor_unitario).replace('.', ',') : ''}" aria-label="Valor unitário">
+    <label class="prck" title="Entra no valor do endereço"><input type="checkbox" class="pr-f" ${it.faturavel || (it.faturavel === undefined && it.valor_unitario != null) ? 'checked' : ''}> Fatura</label>
+    <label class="prck" title="Cada unidade tem patrimônio / número de série"><input type="checkbox" class="pr-p" ${it.controla_patrimonio ? 'checked' : ''}> Patrimônio</label>
+    <button class="x" type="button" aria-label="Remover item">×</button></div>`;
+}
+function editorPrecos(el, linhas) {
+  const box = RP.$('.prbox', el);
+  const sug = [...new Set([...itensCt.map((i) => i.nome), ...SUGESTOES])];
+  box.innerHTML = `<datalist id="dl-itens">${sug.map((n) => `<option value="${RP.esc(n)}">`).join('')}</datalist><div class="prhead"><span>Item</span><span>Unid.</span><span>Valor unitário</span><span></span><span></span><span></span></div>` + linhas.map(linhaPreco).join('');
+  const bind = () => RP.$$('.prrow .x', box).forEach((b) => (b.onclick = () => b.closest('.prrow').remove()));
+  RP.$('.pradd', el).onclick = () => { box.insertAdjacentHTML('beforeend', linhaPreco({})); bind(); box.lastElementChild.querySelector('.pr-n').focus(); };
+  box.addEventListener('input', (ev) => { if (ev.target.classList.contains('pr-v')) { const ck = ev.target.closest('.prrow').querySelector('.pr-f'); if (ev.target.value.trim() && !ck.checked) ck.checked = true; } });
+  bind();
+}
+const lerPrecos = (el) => RP.$$('.prrow', el).map((r) => ({ nome: r.querySelector('.pr-n').value.trim(), unidade: r.querySelector('.pr-u').value.trim(),
+  valor_unitario: dinheiro(r.querySelector('.pr-v').value), faturavel: r.querySelector('.pr-f').checked, controla_patrimonio: r.querySelector('.pr-p').checked })).filter((i) => i.nome);
 const lerItens = (el) => RP.$$('.itrow', el).map((r) => ({ nome: r.querySelector('.it-n').value.trim(), quantidade: r.querySelector('.it-q') ? (r.querySelector('.it-q').value === '' ? 0 : +r.querySelector('.it-q').value) : 0 })).filter((i) => i.nome);
 const f = (id, label, val = '', extra = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${RP.esc(val ?? '')}" ${extra}></div>`;
 const val = (el, id) => RP.$('#' + id, el).value;
@@ -157,13 +193,13 @@ function tabEnderecos(el) {
         ${vis.length && podeExcluir() ? `<button type="button" role="menuitem" class="perigo" id="delv">Excluir os ${vis.length} listados</button>` : ''}
       </div></details>
       <button class="btn sm" id="imp">Importar planilha</button><button class="btn sm primary" id="ne">+ Endereço</button></div>
-    <div class="scroll"><table class="tbl"><thead><tr><th>Código</th><th>Endereço</th><th>Município</th><th>UF</th><th>Etapa</th><th>Equipe</th><th>${vista === 'concluidos' ? 'Concluído em' : 'Início'}</th>${verItens ? itensCt.map((i) => `<th style="text-align:right">${RP.esc(i.nome)}</th>`).join('') : '<th>Equipamentos</th>'}<th>Status</th><th title="Marcado = entra no Painel de rotas e na distribuição">Rota</th></tr></thead>
+    <div class="scroll"><table class="tbl"><thead><tr><th>Código</th><th>Endereço</th><th>Município</th><th>UF</th><th>Etapa</th><th>Equipe</th><th>${vista === 'concluidos' ? 'Concluído em' : 'Início'}</th>${verItens ? itensCt.map((i) => `<th style="text-align:right">${RP.esc(i.nome)}</th>`).join('') : '<th>Equipamentos</th>'}<th style="text-align:right">Valor</th><th>Status</th><th title="Marcado = entra no Painel de rotas e na distribuição">Rota</th></tr></thead>
     <tbody>${vis.map((e) => `<tr class="click" data-id="${e.id}"><td>${RP.esc(e.codigo || '—')}</td><td><b>${RP.esc(e.nome)}</b>${e.na_rota === false ? ' <span class="tag-fora">fora da rota</span>' : ''}${e.logradouro ? `<div class="muted" style="font-size:.82rem">${RP.esc(e.logradouro)}</div>` : ''}</td><td>${RP.esc(e.municipio)}</td><td>${e.uf}</td><td style="white-space:nowrap">${e.etapa ? `${RP.esc(e.etapa)}${e.ordem_etapa ? ` · <b>${e.ordem_etapa}º</b>` : ''}<div class="muted" style="font-size:.78rem">início ${RP.fmtData(e.etapa_inicio)}</div>` : '<span class="muted">—</span>'}</td>
       <td style="white-space:nowrap">${e.equipe ? `<span class="eqdot" style="--c:${corEq(e.equipe)}"></span>Equipe ${e.equipe}` : '<span class="muted">—</span>'}</td>
       <td style="white-space:nowrap">${concluido(e) ? `<b style="color:var(--ok)">✓ ${dBr(e.concluido_em)}</b>${vista !== 'abertos' ? ` <button type="button" class="btn sm" data-reabrir="${e.id}" title="Apaga a data de conclusão e devolve o endereço para a rota">Retornar</button>` : ''}`
         : e.inicio_previsto ? `${dBr(e.inicio_previsto)}${e.fim_previsto && e.fim_previsto !== e.inicio_previsto ? ' → ' + dCurta(e.fim_previsto) : ''}${e.dias_previstos ? `<div class="muted" style="font-size:.78rem">${fmtDias(e.dias_previstos)} dia(s)</div>` : ''}${atrasado(e) ? '<div class="tag-late">⚠ atrasado</div>' : ''}` : (e.dias_previstos ? `<span class="muted" style="font-size:.82rem">${fmtDias(e.dias_previstos)} dia(s)</span>` : '<span class="muted">—</span>')}</td>
-      ${verItens ? itensCt.map((i) => { const q = qtdItem(e, i.nome); return `<td style="text-align:right">${q ? `<b>${RP.fmtN(q)}</b>` : '<span class="muted">—</span>'}</td>`; }).join('') : `<td class="muted" style="font-size:.85rem;max-width:280px">${resumoItens(e.itens) || '—'}</td>`}<td>${RP.esc(e.status)}</td><td><label class="rtog" title="${e.na_rota === false ? 'Fora da rota: clique para incluir' : 'Na rota: clique para tirar'}"><input type="checkbox" data-rota="${e.id}" ${e.na_rota === false ? '' : 'checked'} aria-label="${RP.esc(e.nome)} vai para a rota"><span></span></label></td></tr>`).join('')}</tbody>
-    ${verItens && vis.length ? `<tfoot><tr><td colspan="7"><b>Total dos ${vis.length} listados</b></td>${itensCt.map((i) => `<td style="text-align:right"><b>${RP.fmtN(vis.reduce((a, e) => a + qtdItem(e, i.nome), 0))}</b></td>`).join('')}<td></td><td></td></tr></tfoot>` : ''}</table>
+      ${verItens ? itensCt.map((i) => { const q = qtdItem(e, i.nome); return `<td style="text-align:right">${q ? `<b>${RP.fmtN(q)}</b>` : '<span class="muted">—</span>'}</td>`; }).join('') : `<td class="muted" style="font-size:.85rem;max-width:280px">${resumoItens(e.itens) || '—'}</td>`}<td style="text-align:right;white-space:nowrap">${e.valor ? `<span title="${concluido(e) ? 'Gerado na conclusão' : 'Previsto'}" style="${concluido(e) ? 'color:var(--ok);font-weight:700' : ''}">${R$(e.valor)}</span>` : '<span class="muted">—</span>'}</td><td>${RP.esc(e.status)}</td><td><label class="rtog" title="${e.na_rota === false ? 'Fora da rota: clique para incluir' : 'Na rota: clique para tirar'}"><input type="checkbox" data-rota="${e.id}" ${e.na_rota === false ? '' : 'checked'} aria-label="${RP.esc(e.nome)} vai para a rota"><span></span></label></td></tr>`).join('')}</tbody>
+    ${verItens && vis.length ? `<tfoot><tr><td colspan="7"><b>Total dos ${vis.length} listados</b></td>${itensCt.map((i) => `<td style="text-align:right"><b>${RP.fmtN(vis.reduce((a, e) => a + qtdItem(e, i.nome), 0))}</b></td>`).join('')}<td style="text-align:right"><b>${R$(vis.reduce((a, e) => a + (e.valor || 0), 0))}</b></td><td></td><td></td></tr></tfoot>` : ''}</table>
     ${vis.length ? '' : `<div class="empty">${vista === 'concluidos' ? 'Nenhum endereço concluído. Para concluir, abra o endereço e informe a <b>Data de conclusão</b>.' : 'Nenhum endereço.'}</div>`}</div>`;
   RP.$('#ct', el).onchange = async (e) => { contratoSel = +e.target.value; await carregarContrato(); render(); };
   const q$ = RP.$('#q', el); q$.oninput = () => { q = q$.value; clearTimeout(q$._t); q$._t = setTimeout(() => { render(); RP.$('#q').focus(); }, 250); };
@@ -208,6 +244,9 @@ function passosPrep(abertos) {
       acoes: [['imp', 'Importar planilha', true], ['ne', '+ Endereço']] },
     { k: 'atv', t: 'Atividades', ok: !!(prep && prep.atividades), info: prep && prep.atividades ? `${prep.atividades} atividades em cada endereço` : 'Use as atividades padrão e ajuste se precisar',
       acoes: prep && prep.atividades ? [['link:/app/atividades.html?cliente=' + cli.id + '&contrato=' + contratoSel, 'Ajustar']] : [['padrao', 'Usar as atividades padrão', true]] },
+    { k: 'preco', t: 'Itens e preços', ok: itensCt.some((i) => i.faturavel && i.valor_unitario != null) || +(ct && ct.valor_endereco) > 0,
+      info: itensCt.some((i) => i.faturavel && i.valor_unitario != null) ? `${itensCt.filter((i) => i.faturavel && i.valor_unitario != null).length} item(ns) com preço · o valor sai na conclusão` : 'Defina o valor de cada item para o faturamento',
+      acoes: [['precos', itensCt.some((i) => i.faturavel) ? 'Ajustar preços' : 'Definir preços', true]] },
     { k: 'eq', t: 'Equipes e datas', ok: ends.length > 0 && nEq > 0 && !semPlano, info: !nEq ? 'Escolha quantas equipes vão atuar' : semPlano ? `${semPlano} endereço(s) sem equipe ou início` : `${nEq} equipe(s) com datas`,
       acoes: !nEq ? [['neq', 'Definir equipes', true]] : [['dist', semPlano ? 'Distribuir equipes e datas' : 'Redistribuir', !!semPlano]] },
     { k: 'resp', t: 'Responsáveis', ok: !!(prep && prep.tarefas && !prep.sem_responsavel), info: !prep || !prep.tarefas ? 'Aparece quando houver endereços e atividades' : prep.sem_responsavel ? `${RP.fmtN(prep.sem_responsavel)} atividade(s) sem responsável` : 'Todas as atividades têm responsável',
@@ -217,7 +256,7 @@ function passosPrep(abertos) {
 function guia(abertos) {
   if (!contratoSel) return '';
   const ps = passosPrep(abertos), feitos = ps.filter((p) => p.ok).length, prox = ps.find((p) => !p.ok);
-  if (!prox) return `<div class="guia ok"><span class="guia-sel">✓</span><b>Projeto pronto para executar</b><span class="muted">Endereços, atividades, equipes e responsáveis definidos. Acompanhe pelas abas Painel e rotas e Execução.</span></div>`;
+  if (!prox) return `<div class="guia ok"><span class="guia-sel">✓</span><b>Projeto pronto para executar</b><span class="muted">Endereços, atividades, preços, equipes e responsáveis definidos. Acompanhe pelas abas Painel e rotas e Execução.</span></div>`;
   return `<details class="guia" ${guiaAberto ? 'open' : ''}><summary><b>Preparação do projeto</b><span class="guia-prog"><i style="width:${feitos / ps.length * 100}%"></i></span><span class="muted">${feitos} de ${ps.length} prontos · próximo: <b style="color:var(--ink)">${prox.t}</b></span></summary>
     <ol class="guia-passos">${ps.map((p, i) => `<li class="${p.ok ? 'ok' : p === prox ? 'agora' : ''}"><div class="guia-h"><span class="guia-n">${p.ok ? '✓' : i + 1}</span><div class="guia-t"><b>${p.t}</b><small>${p.info}</small></div></div>
       <div class="guia-a">${p.acoes.map(([a, t, pri]) => a.startsWith('link:') ? `<a class="btn sm${pri && p === prox ? ' primary' : ''}" href="${a.slice(5)}">${t}</a>` : `<button type="button" class="btn sm${pri && p === prox ? ' primary' : ''}" data-guia="${a}">${t}</button>`).join('')}</div></li>`).join('')}</ol>
@@ -231,6 +270,7 @@ function ligarGuia(el) {
     if (a === 'imp') importar();
     else if (a === 'ne') endereco(null);
     else if (a === 'dist') distribuir();
+    else if (a === 'precos') itensProjeto(contratoSel, async () => { await carregarContrato(); render(); });
     else if (a === 'neq') { const s2 = RP.$('#neq', el); s2.focus(); s2.classList.add('pisca'); setTimeout(() => s2.classList.remove('pisca'), 1600); RP.toast('Escolha quantas equipes vão atuar neste projeto'); }
     else if (a === 'padrao') RP.busy(b, async () => {
       try { await RP.api(`/contratos/${contratoSel}/atividades/padrao`, { method: 'POST' }); RP.toast('Atividades padrão incluídas em todos os endereços'); await carregarContrato(); render(); }
@@ -402,6 +442,8 @@ function endereco(e) {
     <h3 style="font-size:1.05rem;margin:14px 0 4px">Equipamentos para instalar</h3>
     <p class="muted" style="font-size:.85rem;margin:0 0 10px">Digite o equipamento (ou escolha da lista) e a quantidade. Use + para incluir mais. Equipamentos novos entram nos itens do projeto. A quantidade de “Câmera” atualiza o campo Câmeras.</p>
     <div class="itbox"></div><button class="btn sm itadd" type="button">+ Equipamento</button>
+    <div class="valend" id="e-val"></div>
+    ${e ? `<h3 style="font-size:1.05rem;margin:18px 0 4px">Patrimônio neste endereço</h3><div id="e-pat" class="muted" style="font-size:.9rem">Carregando…</div>` : ''}
     ${!e ? '<p class="muted" style="font-size:.88rem">As atividades do contrato são criadas para este endereço automaticamente.</p>' : ''}
     ${e && podeExcluir() ? '<div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px"><button class="btn sm danger" type="button" id="e-del">Excluir endereço</button> <span class="muted" style="font-size:.82rem">Apaga também as atividades, checklists e fotos dele.</span></div>' : ''}`, {
     onSave: async (el) => {
@@ -419,7 +461,23 @@ function endereco(e) {
   editorItens(d.el, [...atuais, ...faltam].length ? [...atuais, ...faltam] : [{}]);
   const sync = () => { const r = RP.$$('.itrow', d.el).find((x) => ehCamera(x.querySelector('.it-n').value)); if (r) RP.$('#e-cam', d.el).value = r.querySelector('.it-q').value || 0; };
   d.el.addEventListener('input', (ev) => { if (ev.target.classList.contains('it-q') || ev.target.classList.contains('it-n')) sync(); });
-  RP.$('#e-hoje', d.el).onclick = () => { RP.$('#e-conc', d.el).value = hoje(); };
+  RP.$('#e-hoje', d.el).onclick = () => { RP.$('#e-conc', d.el).value = hoje(); valor(); };
+  // valor do endereço ao vivo (muda com as quantidades); com data de conclusão ele está gerado e vai para a medição
+  const valor = () => {
+    const v2 = valorDe(lerItens(d.el)), conc = !!RP.$('#e-conc', d.el).value;
+    RP.$('#e-val', d.el).innerHTML = v2.partes.length ? `<span>${conc ? 'Valor gerado (concluído)' : 'Valor previsto'}</span><b>${R$(v2.total)}</b><small>${v2.partes.join(' + ')}</small>${conc ? '<small>Pronto para a medição em Faturamento, conforme a regra do contrato.</small>' : ''}`
+      : '<small class="muted">Sem valor: defina os preços em Contratos → Itens e preços.</small>';
+  };
+  d.el.addEventListener('input', valor); RP.$('#e-conc', d.el).addEventListener('change', valor); valor();
+  if (e) RP.api(`/enderecos/${e.id}/ativos`).then((as) => {
+    const box = RP.$('#e-pat', d.el); if (!box) return;
+    const ctr = itensCt.filter((i) => i.controla_patrimonio);
+    const cont = ctr.map((i) => { const q = (x.itens || []).find((y) => normTxt(y.nome) === normTxt(i.nome)); const n = as.filter((a) => a.item_id === i.id && a.status === 'instalado').length;
+      return `<span class="pill ${q && n < q.quantidade ? 'warnp' : ''}">${RP.esc(i.nome)} ${n}/${q ? q.quantidade : 0}</span>`; }).join(' ');
+    box.innerHTML = `${cont ? `<div class="chips" style="margin-bottom:8px">${cont}</div>` : ''}
+      ${as.length ? `<div class="scroll" style="border:1px solid var(--line);border-radius:10px;max-height:220px"><table class="tbl"><tbody>${as.map((a) => `<tr><td><b>${RP.esc(a.patrimonio || '—')}</b><div class="muted" style="font-size:.8rem">${RP.esc(a.item || 'Sem item')} · série ${RP.esc(a.numero_serie || '—')}</div></td><td>${RP.esc([a.fabricante, a.modelo].filter(Boolean).join(' ') || '')}</td><td>${RP.esc(STATUS_AT[a.status] || a.status)}</td></tr>`).join('')}</tbody></table></div>` : 'Nenhum ativo vinculado ainda.'}
+      ${Shell.pode('patrimonio') ? `<div style="margin-top:8px"><a class="btn sm" href="/app/patrimonio.html?contrato=${contratoSel}&endereco=${e.id}">Gerenciar no Patrimônio</a></div>` : ''}`;
+  }).catch(() => { const b = RP.$('#e-pat', d.el); if (b) b.textContent = ''; });
   RP.$('#e-del', d.el)?.addEventListener('click', () => excluirEnderecos([e], d.close));
   RP.$('#e-hist', d.el)?.addEventListener('click', () => RPH.abrir(`Histórico · ${e.nome}`, `/enderecos/${e.id}/historico`));
   RP.$('#e-geo', d.el)?.addEventListener('click', (ev) => RP.busy(ev.currentTarget, async () => {
@@ -657,18 +715,19 @@ function previaDistribuicao(params, r) {
 // Itens do projeto (catálogo de equipamentos do contrato)
 function itensProjeto(contratoId, depois) {
   const ct = cli.contratos.find((c) => c.id === contratoId);
-  const d = RP.drawer('Itens do projeto', `
-    <p class="muted" style="margin-top:0">Equipamentos do contrato <b style="color:var(--ink)">${RP.esc(ct ? ct.numero : '')}</b>. Eles aparecem em cada endereço para informar a quantidade a instalar, e viram colunas na planilha de importação.</p>
-    <div class="itbox"></div><button class="btn sm itadd" type="button">+ Item</button>
+  const d = RP.drawer('Itens e preços do contrato', `
+    <p class="muted" style="margin-top:0">Itens do contrato <b style="color:var(--ink)">${RP.esc(ct ? ct.numero : '')}</b>. Em cada endereço você informa a quantidade; o valor do endereço é a soma dos itens marcados em <b>Fatura</b> (quantidade × valor unitário)${ct && +ct.valor_endereco ? ` mais a taxa fixa de ${R$(ct.valor_endereco)}` : ''}. Marque <b>Patrimônio</b> nos itens que têm número de patrimônio ou de série.</p>
+    <div class="prbox"></div><button class="btn sm pradd" type="button">+ Item</button>
     ${itensCt.some((i) => i.total) ? `<p class="muted" style="font-size:.85rem;margin-top:14px">Totais: ${itensCt.filter((i) => i.total).map((i) => `${RP.esc(i.nome)} <b style="color:var(--ink)">${RP.fmtN(i.total)}</b>`).join(' · ')}</p>` : ''}
     <p class="muted" style="font-size:.85rem">Remover um item apaga as quantidades dele nos endereços.</p>`, {
     onSave: async (el) => {
-      const itens = lerItens(el);
+      const itens = lerPrecos(el);
       await RP.api(`/contratos/${contratoId}/itens`, { method: 'PUT', body: { itens } });
-      RP.toast('Itens do projeto salvos'); if (depois) depois(); else abrir(cli.id);
+      RP.toast('Itens e preços salvos'); if (depois) depois(); else abrir(cli.id);
     },
   });
-  editorItens(d.el, itensCt.length ? itensCt : [{ nome: 'Câmera' }, { nome: 'Servidor / NVR' }, { nome: 'Switch PoE' }], false);
+  d.el.classList.add('wide');
+  editorPrecos(d.el, itensCt.length ? itensCt : [{ nome: 'Câmera', controla_patrimonio: true }, { nome: 'Servidor / NVR', controla_patrimonio: true }, { nome: 'Switch PoE', controla_patrimonio: true }]);
 }
 
 function tabContratos(el) {
@@ -676,10 +735,10 @@ function tabContratos(el) {
     ${cli.contratos.map((c) => `<div class="row" style="padding:14px 16px;border-top:1px solid var(--line);align-items:flex-start">
       <div style="flex:1;min-width:220px"><b>${RP.esc(c.numero)}</b> <span class="pill">${c.tipo === 'aditivo' ? 'Aditivo' : 'Principal'}</span> <span class="pill">${RP.esc(c.status)}</span>
         <div class="muted" style="font-size:.9rem">${RP.esc(c.objeto || '')}</div>
-        <div class="muted" style="font-size:.85rem">${c.empresa ? `Executora: <b style="color:var(--ink)">${RP.esc(c.empresa)}</b> · ` : ''}${c.enderecos} endereços · ${RP.fmtN(c.cameras)} câmeras · vigência ${RP.fmtData(c.vigencia_inicio)} a ${RP.fmtData(c.vigencia_fim)} · cobrança ${c.regra_cobranca === 'apos_handover' ? 'após handover' : 'após validação'}</div>
+        <div class="muted" style="font-size:.85rem">${c.empresa ? `Executora: <b style="color:var(--ink)">${RP.esc(c.empresa)}</b> · ` : ''}${c.enderecos} endereços · ${RP.fmtN(c.cameras)} câmeras · vigência ${RP.fmtData(c.vigencia_inicio)} a ${RP.fmtData(c.vigencia_fim)} · cobrança ${c.regra_cobranca === 'apos_handover' ? 'após handover' : 'após validação'}${+c.valor_endereco ? ` · taxa ${R$(c.valor_endereco)}/endereço` : ''}${c.exige_patrimonio ? ' · exige patrimônio para faturar' : ''}</div>
         <div class="muted" style="font-size:.85rem" id="arq-${c.id}"></div>
         <div class="chips" style="margin-top:6px" id="its-${c.id}"></div></div>
-      <button class="btn sm" data-it="${c.id}">Itens do projeto</button>
+      <button class="btn sm" data-it="${c.id}">Itens e preços</button>
       <label class="btn sm">Anexar PDF<input type="file" accept="application/pdf" hidden data-up="${c.id}"></label>
       <button class="btn sm" data-ed="${c.id}">Editar</button></div>`).join('') || '<div class="empty">Nenhum contrato.</div>'}`;
   RP.$('#nc', el).onclick = () => contrato(null);
@@ -689,7 +748,7 @@ function tabContratos(el) {
   cli.contratos.forEach(async (c) => {
     const its = await RP.api(`/contratos/${c.id}/itens`);
     const box = RP.$('#its-' + c.id); if (!box) return;
-    box.innerHTML = its.length ? its.map((i) => `<span class="pill">${RP.esc(i.nome)}${i.total ? ` · ${RP.fmtN(i.total)}` : ''}</span>`).join('') : '<span class="muted" style="font-size:.85rem">Sem itens do projeto</span>';
+    box.innerHTML = its.length ? its.map((i) => `<span class="pill" title="${i.controla_patrimonio ? 'Controla patrimônio' : ''}">${RP.esc(i.nome)}${i.total ? ` · ${RP.fmtN(i.total)} ${RP.esc(i.unidade || 'un')}` : ''}${i.faturavel && i.valor_unitario != null ? ` · ${R$(i.valor_unitario)}` : ' · não fatura'}${i.controla_patrimonio ? ' · 🏷' : ''}</span>`).join('') : '<span class="muted" style="font-size:.85rem">Sem itens</span>';
   });
   cli.contratos.forEach(async (c) => {
     if (!c.arquivos) { RP.$('#arq-' + c.id).textContent = 'Sem PDF anexado'; return; }
@@ -716,8 +775,10 @@ function contratoCampos(x) {
     <div class="field"><label for="c-tipo">Tipo</label><select class="input" id="c-tipo"><option value="principal">Contrato principal</option><option value="aditivo" ${x.tipo === 'aditivo' ? 'selected' : ''}>Aditivo</option></select></div>
     <div class="field"><label for="c-obj">Objeto</label><textarea class="input" id="c-obj">${RP.esc(x.objeto || '')}</textarea></div>
     <div class="row"><div style="flex:1">${f('c-ini', 'Início da vigência', x.vigencia_inicio, 'type="date"')}</div><div style="flex:1">${f('c-fim', 'Fim da vigência', x.vigencia_fim, 'type="date"')}</div></div>
-    <div class="row"><div style="flex:1">${f('c-vc', 'Valor por câmera (R$)', x.valor_camera, 'inputmode="decimal"')}</div><div style="flex:1">${f('c-ve', 'Valor por endereço (R$)', x.valor_endereco, 'inputmode="decimal"')}</div></div>
-    <div class="field"><label for="c-reg">Quando faturar</label><select class="input" id="c-reg"><option value="apos_validacao">Após a validação das imagens</option><option value="apos_handover" ${x.regra_cobranca === 'apos_handover' ? 'selected' : ''}>Após o handover</option></select></div>`;
+    <div class="row"><div style="flex:1">${f('c-ve', 'Taxa fixa por endereço (R$)', x.valor_endereco, 'inputmode="decimal" placeholder="Opcional"')}</div>
+      <div class="field" style="flex:1"><label for="c-reg">Quando faturar</label><select class="input" id="c-reg"><option value="apos_validacao">Após a validação das imagens</option><option value="apos_handover" ${x.regra_cobranca === 'apos_handover' ? 'selected' : ''}>Após o handover</option></select></div></div>
+    <p class="muted" style="font-size:.85rem;margin:-6px 0 10px">O valor de cada endereço vem dos <b>itens e preços</b> do contrato (câmera, servidor…) × quantidades do endereço, mais a taxa fixa.</p>
+    <label class="check"><input type="checkbox" id="c-pat" ${x.exige_patrimonio ? 'checked' : ''}><span><b>Exigir patrimônio para faturar</b><br><span class="muted">O endereço só fica apto quando todos os itens com patrimônio estiverem cadastrados como instalados nele.</span></span></label>`;
 }
 // empresa do contrato: escolhida na lista ou cadastrada na hora
 async function empresaDoForm(el) {
@@ -730,19 +791,20 @@ async function empresaDoForm(el) {
 }
 function ligarEmpresa(el) { const s2 = RP.$('#c-emp', el); if (s2) s2.onchange = () => { RP.$('#c-emp-nova', el).hidden = s2.value !== 'nova'; if (s2.value === 'nova') RP.$('#c-emp-n', el).focus(); }; }
 const contratoBody = (el) => ({ numero: val(el, 'c-num'), tipo: val(el, 'c-tipo'), objeto: val(el, 'c-obj'), vigencia_inicio: val(el, 'c-ini'), vigencia_fim: val(el, 'c-fim'),
-  valor_camera: val(el, 'c-vc').replace(',', '.'), valor_endereco: val(el, 'c-ve').replace(',', '.'), regra_cobranca: val(el, 'c-reg') });
+  valor_endereco: dinheiro(val(el, 'c-ve')), regra_cobranca: val(el, 'c-reg'), exige_patrimonio: RP.$('#c-pat', el).checked });
 
 const blocoPadrao = `<label class="check" style="margin-top:14px"><input type="checkbox" id="c-pad" checked><span><b>Já incluir as atividades padrão</b><br><span class="muted">Coordenação, infra, instalação, configuração, validação e handover. Dá para ajustar depois.</span></span></label>`;
-const blocoItens = `<h3 style="font-size:1.15rem;margin:20px 0 4px">Itens do projeto</h3>
-    <p class="muted" style="margin:0 0 10px;font-size:.9rem">Equipamentos que serão instalados nos endereços (câmera, servidor, switch…). Digite e use + para incluir mais. Em cada endereço você informa as quantidades, à mão ou pela planilha.</p>
-    <div class="itbox"></div><button class="btn sm itadd" type="button">+ Item</button>`;
+const blocoItens = `<h3 style="font-size:1.15rem;margin:20px 0 4px">Itens e preços</h3>
+    <p class="muted" style="margin:0 0 10px;font-size:.9rem">O que será instalado nos endereços (câmera, servidor, switch…), o valor de cada um e se tem patrimônio. Em cada endereço você informa as quantidades, à mão ou pela planilha. Ao concluir o endereço, o valor dele fica pronto para a medição.</p>
+    <div class="prbox"></div><button class="btn sm pradd" type="button">+ Item</button>`;
+const ITENS_PADRAO = [{ nome: 'Câmera', controla_patrimonio: true }, { nome: 'Servidor / NVR', controla_patrimonio: true }, { nome: 'Switch PoE', controla_patrimonio: true }];
 
 function contrato(c) {
   const d = RP.drawer(c ? 'Editar contrato' : 'Novo contrato', (c ? '<div class="row" style="justify-content:flex-end;margin:-4px 0 6px"><button type="button" class="btn sm" id="c-hist">Histórico de alterações</button></div>' : '') + contratoCampos(c || {}) + (c ? `<div class="field"><label for="c-st">Situação</label><select class="input" id="c-st">${['ativo', 'suspenso', 'encerrado'].map((s) => `<option ${s === c.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>` : blocoItens + blocoPadrao), {
     onSave: async (el) => {
       const body = contratoBody(el);
       body.empresa_id = await empresaDoForm(el);
-      if (!c) { body.itens = lerItens(el); body.atividades_padrao = RP.$('#c-pad', el).checked; }
+      if (!c) { body.itens = lerPrecos(el); body.atividades_padrao = RP.$('#c-pad', el).checked; }
       if (c) { body.status = val(el, 'c-st'); await RP.api('/contratos/' + c.id, { method: 'PUT', body }); }
       else { const n = await RP.api(`/clientes/${cli.id}/contratos`, { method: 'POST', body }); contratoSel = n.id; }
       RP.toast('Contrato salvo'); abrir(cli.id);
@@ -750,7 +812,7 @@ function contrato(c) {
   });
   ligarEmpresa(d.el);
   RP.$('#c-hist', d.el)?.addEventListener('click', () => RPH.abrir(`Histórico · contrato ${c.numero}`, `/contratos/${c.id}/historico`));
-  if (!c) { const salvo = itensCt; itensCt = []; editorItens(d.el, [{ nome: 'Câmera' }, { nome: 'Servidor / NVR' }, { nome: 'Switch PoE' }], false); itensCt = salvo; }
+  if (!c) { const salvo = itensCt; itensCt = []; editorPrecos(d.el, ITENS_PADRAO); itensCt = salvo; d.el.classList.add('wide'); }
 }
 
 function dadosCampos(x) {
@@ -781,7 +843,7 @@ function novoCliente() {
     saveLabel: 'Criar projeto',
     onSave: async (el) => {
       const body = contratoBody(el);
-      body.itens = lerItens(el);
+      body.itens = lerPrecos(el);
       body.atividades_padrao = RP.$('#c-pad', el).checked;
       body.empresa_id = await empresaDoForm(el);
       if (!String(body.numero || '').trim()) body.numero = 'Contrato principal';
@@ -794,7 +856,8 @@ function novoCliente() {
       RP.toast('Projeto criado'); aba = 'enderecos'; abrir(c.id);
     },
   });
-  editorItens(d.el, [{ nome: 'Câmera' }, { nome: 'Servidor / NVR' }, { nome: 'Switch PoE' }], false);
+  editorPrecos(d.el, ITENS_PADRAO);
+  d.el.classList.add('wide');
   ligarEmpresa(d.el);
 }
 </script>

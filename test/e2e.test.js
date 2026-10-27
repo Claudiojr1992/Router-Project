@@ -19,7 +19,7 @@ test('telas abrem sem erro no navegador', { skip: pular, timeout: 180000 }, asyn
   await p.fill('#senha', process.env.E2E_SENHA);
   await p.click('#go');
   await p.waitForURL('**/app/**');
-  for (const tela of ['projetos', 'tarefas', 'faturamento', 'chat', 'empresas', 'atividades', 'checklists', 'equipe', 'conexoes', 'usuarios', 'permissoes', 'auditoria']) {
+  for (const tela of ['projetos', 'tarefas', 'faturamento', 'patrimonio', 'chat', 'empresas', 'atividades', 'checklists', 'equipe', 'conexoes', 'usuarios', 'permissoes', 'auditoria']) {
     await t.test(tela, async () => {
       await p.goto(`${URL_BASE}/app/${tela}.html`);
       await p.waitForSelector('#content');

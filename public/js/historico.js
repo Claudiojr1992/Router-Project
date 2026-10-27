@@ -5,7 +5,7 @@ const RPH = (() => {
     enderecos: 'Endereços', etapas: 'Etapas', equipe_regras: 'Regras das equipes', atividades: 'Atividades', checklists: 'Checklists', checklist_itens: 'Itens de checklist',
     pessoas: 'Técnicos e times', times: 'Times', time_membros: 'Membros de time', tarefas: 'Atividades dos endereços', regras_distribuicao: 'Regras de distribuição',
     usuarios: 'Usuários', perfis: 'Permissões', medicoes: 'Medições', medicao_enderecos: 'Endereços da medição', integracoes: 'Conexões',
-    monitoramento_ativos: 'Ativos do monitoramento', relatorio_assinaturas: 'Assinaturas de relatório',
+    monitoramento_ativos: 'Ativos do monitoramento', relatorio_assinaturas: 'Assinaturas de relatório', ativos: 'Patrimônio',
   };
   const CAMPOS = {
     nome: 'Nome', codigo: 'Código', logradouro: 'Logradouro', bairro: 'Bairro', cep: 'CEP', municipio: 'Município', uf: 'UF', lat: 'Latitude', lon: 'Longitude',
@@ -18,6 +18,8 @@ const RPH = (() => {
     email: 'E-mail', perfil: 'Perfil', telefone: 'Telefone', empresa: 'Empresa', ativo: 'Ativo', equipes: 'Equipes', meta_instalacoes: 'Meta de instalações',
     permissoes: 'Permissões', acoes: 'Ações especiais', descricao: 'Descrição', url: 'URL', opcoes: 'Opções', hostname: 'Hostname', ip: 'IP', interface: 'Interface',
     numero_nf: 'Nota fiscal', valor_total: 'Valor total', competencia: 'Competência', base_nome: 'Base de saída', objeto: 'Objeto', vigencia_inicio: 'Início da vigência', vigencia_fim: 'Fim da vigência',
+    numero_serie: 'Número de série', fabricante: 'Fabricante', modelo: 'Modelo', mac: 'MAC', instalado_em: 'Instalado em', garantia_ate: 'Garantia até', item_id: 'Item',
+    endereco_id: 'Endereço', faturavel: 'Faturável', valor_unitario: 'Valor unitário', controla_patrimonio: 'Controla patrimônio', exige_patrimonio: 'Exige patrimônio para faturar',
   };
   const OCULTOS = new Set(['id', 'criado_em', 'atualizado_em', 'contrato_id', 'cliente_id', 'ref_id', 'status_antes', 'geo_tentado_em', 'monitorado_em']);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -36,7 +38,7 @@ const RPH = (() => {
   const chaves = (l) => Object.keys(l.depois || l.antes || {}).filter((k) => !OCULTOS.has(k));
   const MOD = { rota: 'Painel de rotas', projetos: 'Projetos', delegadas: 'Delegadas', minhas: 'Minhas atividades', app: 'App do técnico', faturamento: 'Faturamento', chat: 'Chat',
     clientes: 'Clientes', empresas: 'Empresas', atividades: 'Atividades', checklists: 'Checklists', equipe: 'Técnicos e times', conexoes: 'Conexões', usuarios: 'Usuários',
-    permissoes: 'Permissões', auditoria: 'Auditoria', reabrir: 'Reabrir', excluir: 'Excluir', delegar: 'Delegar', distribuir: 'Distribuir', forcar_monitoramento: 'Forçar monitoramento' };
+    permissoes: 'Permissões', auditoria: 'Auditoria', reabrir: 'Reabrir', excluir: 'Excluir', delegar: 'Delegar', distribuir: 'Distribuir', forcar_monitoramento: 'Forçar monitoramento', patrimonio: 'Patrimônio' };
   const obj = (x) => x && typeof x === 'object' && !Array.isArray(x);
   // linhas {rotulo, antes, depois}; objetos (permissões, opções) viram uma linha por item que mudou
   function itens(l) {

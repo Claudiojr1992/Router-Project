@@ -55,6 +55,7 @@ textarea.input{min-height:90px;resize:vertical}
 .alert.err{background:color-mix(in srgb,var(--err) 10%,transparent);border-color:color-mix(in srgb,var(--err) 35%,transparent)}
 .alert.ok{background:color-mix(in srgb,var(--ok) 10%,transparent);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
 .alert.info{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 30%,transparent)}
+.alert.warn{background:color-mix(in srgb,var(--warn) 12%,transparent);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
 
 /* ---------- Telas de acesso ---------- */
 .auth{min-height:100%;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr)}
@@ -469,7 +470,7 @@ a.pjedit{text-decoration:none}
 .guia[open]>summary::after{transform:rotate(-135deg)}
 .guia-prog{width:120px;height:6px;border-radius:99px;background:var(--soft);overflow:hidden;border:1px solid var(--line)}
 .guia-prog i{display:block;height:100%;background:var(--ok)}
-.guia-passos{list-style:none;margin:0;padding:0 16px 8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+.guia-passos{list-style:none;margin:0;padding:0 16px 8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
 .guia-passos li{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel)}
 .guia-passos li.agora{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 .guia-passos li.ok{background:var(--soft)}
@@ -511,3 +512,21 @@ a.pjedit{text-decoration:none}
 .pjextra{display:flex;flex-wrap:wrap;gap:6px;margin:-2px 0 2px}
 .pjextra span{font-size:.78rem;border:1px solid var(--line);border-radius:99px;padding:2px 8px;color:var(--muted)}
 .pjextra span.warn{color:var(--warn);border-color:currentColor}
+/* Itens e preços do contrato */
+.prhead,.prrow{display:grid;grid-template-columns:minmax(150px,1.6fr) 70px minmax(110px,1fr) auto auto 34px;gap:8px;align-items:center}
+.prhead{font-size:.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.prrow{margin-bottom:8px}
+.prck{display:inline-flex;align-items:center;gap:5px;font-size:.85rem;white-space:nowrap;cursor:pointer}
+.prck input{accent-color:var(--accent)}
+@media (max-width:640px){.prhead{display:none}.prrow{grid-template-columns:1fr 70px;padding-bottom:8px;border-bottom:1px solid var(--line)}}
+.valend{display:flex;flex-direction:column;gap:2px;margin:12px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--soft)}
+.valend span{font-size:.8rem;color:var(--muted);font-weight:600}
+.valend b{font-size:1.25rem}
+.valend small{color:var(--muted);font-size:.82rem}
+.pill.warnp{color:var(--warn);border-color:currentColor}
+/* Patrimônio */
+.patgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.patcard{display:flex;flex-direction:column;gap:6px;text-align:left;padding:14px;cursor:pointer;font:inherit;color:inherit}
+.patcard.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.patcard>span{font-size:.9rem;color:var(--muted)}
+.patcard>span b{color:var(--ink);font-size:1.15rem}

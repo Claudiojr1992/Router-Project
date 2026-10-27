@@ -23,7 +23,7 @@ const MES = (d) => { const [y, m] = String(d).slice(0, 7).split('-'); return ['j
 const pill = (s) => `<span class="pill" style="color:${ST[s][1]}"><i></i>${ST[s][0]}</span>`;
 
 (async () => {
-  S = await Shell.init({ key: 'faturamento', title: 'Faturamento', sub: 'Medição mensal por contrato: endereços aptos, envio, aprovação, nota fiscal e recebimento', perfis: Shell.ESC });
+  S = await Shell.init({ key: 'faturamento', title: 'Faturamento', sub: 'Valor por item do contrato, gerado na conclusão de cada endereço: medição, envio, aprovação, nota fiscal e recebimento', perfis: Shell.ESC });
   const id = +new URLSearchParams(location.search).get('c');
   await lista();
   if (id && contratos.some((c) => c.id === id)) abrirContrato(id);
@@ -40,6 +40,8 @@ const FICO = {
   rc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
   ed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
 };
+// "Câmera 14 × R$ 350,00 + taxa R$ 50,00"
+const compos = (det, taxa) => [...(det || []).map((x) => `${RP.esc(x.item)} ${RP.fmtN(x.quantidade)} × ${R$(x.valor_unitario)}`), ...(+taxa ? [`taxa ${R$(taxa)}`] : [])].join(' + ') || '—';
 const RC = (n) => (Math.abs(n) >= 1e6 ? 'R$ ' + (n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mi' : Math.abs(n) >= 1e4 ? 'R$ ' + Math.round(n / 1e3).toLocaleString('pt-BR') + ' mil' : R$(n));
 
 async function lista() {
@@ -80,18 +82,18 @@ function fcards() {
   const el = RP.$('#fc-grid');
   if (!l.length) { el.innerHTML = '<div class="card empty" style="grid-column:1/-1">Nenhum contrato neste filtro.</div>'; return; }
   el.innerHTML = l.map((c) => {
-    const st = fsit(c), pc = fpct(c), falta = Math.max(0, c.valor_total - c.faturado), sv = !c.valor_camera && !c.valor_endereco;
+    const st = fsit(c), pc = fpct(c), falta = Math.max(0, c.valor_total - c.faturado), sv = !c.itens_preco && !c.valor_endereco;
     return `<article class="pjcard" data-id="${c.id}" tabindex="0" role="button" aria-label="Abrir faturamento de ${RP.esc(c.cliente)} ${RP.esc(c.numero)}">
       <div class="pjtop"><span class="pjbadge" style="--c:${FS[st][1]}"><i></i>${FS[st][0]}</span>${c.empresa ? `<span class="pjfora">${RP.esc(c.empresa)}</span>` : ''}</div>
       <h3>${RP.esc(c.cliente)} · ${RP.esc(c.numero)}</h3>
-      <p class="pjdate">Faturar ${REGRA[c.regra_cobranca]} · ${c.valor_camera ? R$(c.valor_camera) + '/câmera' : ''}${c.valor_camera && c.valor_endereco ? ' + ' : ''}${c.valor_endereco ? R$(c.valor_endereco) + '/endereço' : ''}${sv ? '<span class="tag-late">sem valores no contrato</span>' : ''}</p>
+      <p class="pjdate">Faturar ${REGRA[c.regra_cobranca]} · ${c.itens_preco ? `${c.itens_preco} item(ns) com preço` : ''}${c.itens_preco && c.valor_endereco ? ' + ' : ''}${c.valor_endereco ? R$(c.valor_endereco) + '/endereço' : ''}${c.exige_patrimonio ? ' · exige patrimônio' : ''}${sv ? '<span class="tag-late">sem preços no contrato</span>' : ''}</p>
       <div class="pjmeta">
         <div><span>Faturado do contrato</span><b>${RC(c.faturado)} <small>/ ${RC(c.valor_total)}</small></b><small class="${sv || falta ? '' : 'ok'}">${sv ? 'Defina os valores para calcular' : falta ? `${R$(falta)} a faturar` : 'Contrato todo faturado'}</small></div>
-        <a class="pjedit" href="/app/clientes.html?id=${c.cliente_id}&aba=contratos" title="Editar valores e regra do contrato" aria-label="Editar contrato">${FICO.ed}</a>
+        <a class="pjedit" href="/app/clientes.html?id=${c.cliente_id}&aba=contratos" title="Editar itens, preços e regra do contrato" aria-label="Editar contrato">${FICO.ed}</a>
       </div>
       <div class="pjprog"><div class="pjprog-h"><span>Avanço do faturamento</span><b>${pc}%</b></div><div class="pjbar" style="--c:${FS[st][1] === 'var(--muted)' ? 'var(--accent)' : FS[st][1]}"><i style="width:${pc}%"></i></div></div>
       <div class="pjtiles">
-        <div><span class="ic">${FICO.un}</span><b>${RP.fmtN(c.medidos)}<small style="font-size:.85rem"> /${RP.fmtN(c.enderecos)}</small></b><small>Medidos</small></div>
+        <div><span class="ic">${FICO.un}</span><b>${RP.fmtN(c.medidos)}<small style="font-size:.85rem"> /${RP.fmtN(c.enderecos)}</small></b><small>Medidos · gerado ${RC(c.valor_gerado)}</small></div>
         <div class="${c.aptos ? 'warm' : ''}"><span class="ic at">${FICO.ap}</span><b>${RP.fmtN(c.aptos)}</b><small>Prontos · ${RC(c.valor_apto)}</small></div>
         <div><span class="ic ok">${FICO.rc}</span><b style="font-size:1.1rem">${RC(c.recebido)}</b><small>Recebido</small></div>
       </div>
@@ -115,8 +117,15 @@ async function abrirContrato(id) {
   S.content.innerHTML = `
     <div class="card"><div class="body row" style="gap:16px;align-items:flex-start">
       <div style="flex:1;min-width:240px"><h2 style="font-size:1.6rem">${RP.esc(ct.cliente)} · ${RP.esc(ct.numero)}</h2>
-        <div class="muted">${ct.empresa ? 'Executora: ' + RP.esc(ct.empresa) + ' · ' : ''}faturar ${REGRA[ct.regra_cobranca]} · ${ct.valor_camera ? R$(ct.valor_camera) + ' por câmera' : ''}${ct.valor_camera && ct.valor_endereco ? ' + ' : ''}${ct.valor_endereco ? R$(ct.valor_endereco) + ' por endereço' : ''}${!ct.valor_camera && !ct.valor_endereco ? '<span class="tag-late">defina os valores no contrato (Clientes → Contratos)</span>' : ''}</div></div>
+        <div class="muted">${ct.empresa ? 'Executora: ' + RP.esc(ct.empresa) + ' · ' : ''}faturar ${REGRA[ct.regra_cobranca]}${ct.valor_endereco ? ' · taxa ' + R$(ct.valor_endereco) + ' por endereço' : ''}${ct.exige_patrimonio ? ' · exige patrimônio instalado' : ''}${!d.itens.some((i) => i.faturavel && i.valor_unitario != null) && !ct.valor_endereco ? ' <span class="tag-late">defina os preços em Cadastro e endereços → Contratos → Itens e preços</span>' : ''}</div></div>
       <div class="kpi" style="min-width:180px"><span>Pronto para medir</span><b>${R$(totApto)}</b><small class="muted">${d.aptos.length} endereço(s)</small></div></div></div>
+    <div class="card"><header><h2>Itens e preços</h2><span class="spacer"></span><a class="btn sm" href="/app/clientes.html?id=${ct.cliente_id}&aba=contratos">Editar preços</a></header>
+      ${d.itens.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Item</th><th style="text-align:right">Valor unitário</th><th style="text-align:right">Previsto</th><th style="text-align:right">Concluído</th><th style="text-align:right">Valor previsto</th><th style="text-align:right">Valor gerado</th><th>Patrimônio</th></tr></thead><tbody>
+        ${d.itens.map((i) => { const fat = i.faturavel && i.valor_unitario != null; return `<tr><td><b>${RP.esc(i.nome)}</b></td><td style="text-align:right">${fat ? R$(i.valor_unitario) : '<span class="muted">não fatura</span>'}</td>
+          <td style="text-align:right">${RP.fmtN(i.previsto)} ${RP.esc(i.unidade || '')}</td><td style="text-align:right">${RP.fmtN(i.concluido)}</td>
+          <td style="text-align:right">${fat ? R$(i.previsto * i.valor_unitario) : '—'}</td><td style="text-align:right"><b>${fat ? R$(i.concluido * i.valor_unitario) : '—'}</b></td><td>${i.controla_patrimonio ? 'Controla' : '—'}</td></tr>`; }).join('')}</tbody></table></div>`
+        : '<div class="empty">Sem itens no contrato.</div>'}</div>
+    ${d.pendentes_patrimonio.length ? `<div class="alert warn" style="margin:0"><b>${d.pendentes_patrimonio.length} endereço(s) concluído(s) esperando patrimônio</b> para ficar(em) apto(s): ${d.pendentes_patrimonio.slice(0, 6).map((e) => RP.esc(e.nome)).join(', ')}${d.pendentes_patrimonio.length > 6 ? '…' : ''}. ${Shell.pode('patrimonio') ? `<a href="/app/patrimonio.html?contrato=${ct.id}">Cadastrar no Patrimônio</a>` : ''}</div>` : ''}
     <div class="card"><header><h2>Medições</h2></header>
       ${d.medicoes.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Competência</th><th>Situação</th><th style="text-align:right">Endereços</th><th style="text-align:right">Câmeras</th><th style="text-align:right">Valor</th><th>Nota fiscal</th><th>Andamento</th></tr></thead><tbody>
         ${d.medicoes.map((m) => `<tr class="click" data-m="${m.id}" tabindex="0"><td><b>${MES(m.competencia)}</b></td><td>${pill(m.status)}</td><td style="text-align:right">${m.enderecos}</td><td style="text-align:right">${m.cameras}</td>
@@ -124,8 +133,8 @@ async function abrirContrato(id) {
           <td><div class="fstep">${PASSOS.map((p, i) => `<i class="${PASSOS.indexOf(m.status) >= i ? 'on' : ''}" title="${ST[p][0]}"></i>`).join('')}</div></td></tr>`).join('')}</tbody></table></div>`
         : '<div class="empty">Nenhuma medição ainda. Use “+ Nova medição” para medir os endereços aptos.</div>'}</div>
     <div class="card"><header><h2>Aptos a medir</h2><span class="pill">${d.aptos.length}</span></header>
-      ${d.aptos.length ? `<div class="scroll" style="max-height:420px"><table class="tbl"><thead><tr><th>Código</th><th>Endereço</th><th>Município</th><th>Status</th><th style="text-align:right">Câmeras</th><th style="text-align:right">Valor</th></tr></thead><tbody>
-        ${d.aptos.map((e) => `<tr><td>${RP.esc(e.codigo || '—')}</td><td><b>${RP.esc(e.nome)}</b></td><td>${RP.esc(e.municipio)}/${e.uf}</td><td>${RP.esc(e.status)}</td><td style="text-align:right">${e.cameras}</td><td style="text-align:right">${R$(e.valor)}</td></tr>`).join('')}</tbody></table></div>`
+      ${d.aptos.length ? `<div class="scroll" style="max-height:420px"><table class="tbl"><thead><tr><th>Código</th><th>Endereço</th><th>Município</th><th>Status</th><th>Composição</th><th style="text-align:right">Valor</th></tr></thead><tbody>
+        ${d.aptos.map((e) => `<tr><td>${RP.esc(e.codigo || '—')}</td><td><b>${RP.esc(e.nome)}</b></td><td>${RP.esc(e.municipio)}/${e.uf}</td><td>${RP.esc(e.status)}</td><td class="muted" style="font-size:.85rem">${compos(e.detalhe, ct.valor_endereco)}</td><td style="text-align:right">${R$(e.valor)}</td></tr>`).join('')}</tbody></table></div>`
         : `<div class="empty">Nenhum endereço apto agora. Eles aparecem aqui quando chegam ${ct.regra_cobranca === 'apos_handover' ? 'ao Handover' : 'à Validação'} (ou são concluídos).</div>`}</div>`;
   RP.$$('[data-m]', S.content).forEach((r) => { r.onclick = () => medicao(+r.dataset.m); r.onkeydown = (e) => { if (e.key === 'Enter') r.onclick(); }; });
 }
@@ -137,7 +146,7 @@ function novaMedicao() {
       <div class="field" style="flex:2"><label for="nm-o">Observação</label><input class="input" id="nm-o" placeholder="Opcional"></div></div>
     <div class="row" style="justify-content:space-between;margin-bottom:6px"><label class="check" style="margin:0"><input type="checkbox" id="nm-all" checked> Todos os ${d.aptos.length} aptos</label><b id="nm-tot"></b></div>
     <div class="scroll" style="max-height:52vh;border:1px solid var(--line);border-radius:10px"><table class="tbl"><tbody>
-      ${d.aptos.map((e) => `<tr><td style="width:30px"><input type="checkbox" class="nm-e" value="${e.id}" data-v="${e.valor}" checked aria-label="Incluir ${RP.esc(e.nome)}"></td><td><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.municipio)}/${e.uf} · ${RP.esc(e.status)}</div></td><td style="text-align:right">${e.cameras} câm.</td><td style="text-align:right">${R$(e.valor)}</td></tr>`).join('')}</tbody></table></div>`, {
+      ${d.aptos.map((e) => `<tr><td style="width:30px"><input type="checkbox" class="nm-e" value="${e.id}" data-v="${e.valor}" checked aria-label="Incluir ${RP.esc(e.nome)}"></td><td><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.municipio)}/${e.uf} · ${RP.esc(e.status)}</div></td><td class="muted" style="font-size:.8rem">${compos(e.detalhe, d.contrato.valor_endereco)}</td><td style="text-align:right">${R$(e.valor)}</td></tr>`).join('')}</tbody></table></div>`, {
     saveLabel: 'Criar medição',
     onSave: async (el) => {
       const ids = RP.$$('.nm-e', el).filter((x) => x.checked).map((x) => +x.value);
@@ -160,6 +169,9 @@ async function medicao(id) {
       return `<div class="${on ? 'on' : ''}"><i>${i + 1}</i><b>${ST[p][0]}</b><small>${dt ? RP.fmtData(dt) : p === 'aberta' ? RP.fmtData(m.criado_em) : ''}</small></div>`; }).join('')}</div>
     <div class="row" style="gap:16px;margin:12px 0"><div class="kpi" style="flex:1"><span>Valor</span><b>${R$(m.valor_total)}</b></div><div class="kpi" style="flex:1"><span>Endereços</span><b>${m.itens.length}</b></div>
       <div class="kpi" style="flex:1"><span>Câmeras</span><b>${m.itens.reduce((a, x) => a + x.cameras, 0)}</b></div></div>
+    ${m.resumo && m.resumo.length ? `<div class="scroll" style="border:1px solid var(--line);border-radius:10px;margin-bottom:12px"><table class="tbl"><thead><tr><th>Item</th><th style="text-align:right">Quantidade</th><th style="text-align:right">Valor unitário</th><th style="text-align:right">Total</th></tr></thead><tbody>
+      ${m.resumo.map((r) => `<tr><td><b>${RP.esc(r.item)}</b></td><td style="text-align:right">${RP.fmtN(r.quantidade)}</td><td style="text-align:right">${R$(r.valor_unitario)}</td><td style="text-align:right"><b>${R$(r.total)}</b></td></tr>`).join('')}
+      <tr><td colspan="3"><b>Total da medição</b></td><td style="text-align:right"><b>${R$(m.valor_total)}</b></td></tr></tbody></table></div>` : ''}
     ${m.numero_nf ? `<p style="margin:0 0 10px">Nota fiscal <b>${RP.esc(m.numero_nf)}</b> emitida em ${RP.fmtData(m.emitida_em)}.</p>` : ''}
     ${prox ? `<div class="card" style="padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px"><b>Próximo passo</b>
       <div class="row" style="gap:8px;align-items:flex-end">${prox[0] === 'nf' ? '<div class="field" style="margin:0;flex:1"><label for="md-nf">Número da NF</label><input class="input" id="md-nf"></div>' : ''}
@@ -187,7 +199,9 @@ async function medicao(id) {
   RP.$('#md-x', el).onclick = () => {
     const linhas = [['Código', 'Endereço', 'Município', 'UF', 'Status', 'Câmeras', 'Valor (R$)'], ...m.itens.map((e) => [e.codigo || '', e.nome, e.municipio, e.uf, e.status, e.cameras, e.valor]),
       ['', 'Total', '', '', '', m.itens.reduce((a, x) => a + x.cameras, 0), m.valor_total]];
-    Planilha.baixar(Planilha.xlsx([{ nome: 'Medição', linhas, larguras: [10, 34, 22, 6, 16, 10, 14] }]), `Medicao_${String(m.competencia).slice(0, 7)}_${m.contrato}.xlsx`.replace(/[^A-Za-z0-9._-]+/g, '_'));
+    const det = [['Código', 'Endereço', 'Item', 'Quantidade', 'Valor unitário (R$)', 'Total (R$)'], ...m.itens.flatMap((e) => (e.detalhe || []).map((x) => [e.codigo || '', e.nome, x.item, x.quantidade, x.valor_unitario, x.total]))];
+    const res = [['Item', 'Quantidade', 'Valor unitário (R$)', 'Total (R$)'], ...(m.resumo || []).map((r) => [r.item, r.quantidade, r.valor_unitario, r.total]), ['Total', '', '', m.valor_total]];
+    Planilha.baixar(Planilha.xlsx([{ nome: 'Medição', linhas, larguras: [10, 34, 22, 6, 16, 10, 14] }, { nome: 'Resumo por item', linhas: res, larguras: [28, 12, 18, 16] }, { nome: 'Detalhe', linhas: det, larguras: [10, 34, 24, 12, 18, 16] }]), `Medicao_${String(m.competencia).slice(0, 7)}_${m.contrato}.xlsx`.replace(/[^A-Za-z0-9._-]+/g, '_'));
   };
 }
 </script>

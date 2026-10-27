@@ -1,15 +1,26 @@
-// Faturamento: medição mensal por contrato (endereços aptos pela regra de cobrança × valores do contrato)
+// Faturamento: medição mensal por contrato. Valor do endereço = itens faturáveis do contrato × quantidades do endereço
+// + taxa fixa por endereço. O detalhe por item é gravado na medição (medicao_itens).
 const db = require('../db');
 const v = require('../validate');
 const { HttpError } = require('../http');
 const { requer, ESCRITORIO } = require('../auth');
 
+// Item controlado com menos ativos instalados no endereço do que a quantidade prevista
+const FALTA_PATRIMONIO = `SELECT 1 FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
+   WHERE ei.endereco_id = e.id AND ci.controla_patrimonio AND ei.quantidade >
+     (SELECT count(*) FROM ativos a WHERE a.endereco_id = e.id AND a.item_id = ci.id AND a.status = 'instalado')`;
 // Endereço apto: passou da etapa exigida pela regra do contrato e ainda não está em nenhuma medição
 const APTO = `(CASE ct.regra_cobranca
     WHEN 'apos_handover' THEN e.status IN ('Handover','Concluída') OR e.concluido_em IS NOT NULL
     ELSE e.status IN ('Em validação','Faturado','Handover','Concluída') OR e.concluido_em IS NOT NULL END)
-  AND NOT EXISTS (SELECT 1 FROM medicao_enderecos me WHERE me.endereco_id = e.id)`;
-const VALOR = `(COALESCE(ct.valor_camera,0) * e.cameras + COALESCE(ct.valor_endereco,0))`;
+  AND NOT EXISTS (SELECT 1 FROM medicao_enderecos me WHERE me.endereco_id = e.id)
+  AND (NOT ct.exige_patrimonio OR NOT EXISTS (${FALTA_PATRIMONIO}))`;
+const VALOR = `(COALESCE(ct.valor_endereco,0) + COALESCE((SELECT sum(ei.quantidade * ci.valor_unitario) FROM endereco_itens ei
+    JOIN contrato_itens ci ON ci.id = ei.item_id WHERE ei.endereco_id = e.id AND ci.faturavel AND ci.valor_unitario IS NOT NULL), 0))`;
+// Itens faturáveis do endereço, para mostrar de onde vem o valor
+const DETALHE = `COALESCE((SELECT json_agg(json_build_object('item', ci.nome, 'quantidade', ei.quantidade, 'valor_unitario', ci.valor_unitario,
+    'total', ei.quantidade * ci.valor_unitario) ORDER BY ci.ordem, ci.id) FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
+   WHERE ei.endereco_id = e.id AND ci.faturavel AND ci.valor_unitario IS NOT NULL AND ei.quantidade > 0), '[]')`;
 const FLUXO = { aberta: 'enviada', enviada: 'aprovada', aprovada: 'nf_emitida', nf_emitida: 'recebida' };
 
 async function totalizar(c, medId) {
@@ -20,13 +31,16 @@ module.exports = (app) => {
   const escritorio = requer(ESCRITORIO);
 
   app.get('/api/faturamento/contratos', escritorio, async () => db.many(
-    `SELECT ct.id, ct.numero, ct.tipo, ct.status, ct.valor_camera, ct.valor_endereco, ct.regra_cobranca, cl.id AS cliente_id, cl.nome AS cliente,
+    `SELECT ct.id, ct.numero, ct.tipo, ct.status, ct.valor_endereco, ct.regra_cobranca, ct.exige_patrimonio, cl.id AS cliente_id, cl.nome AS cliente,
+            (SELECT count(*)::int FROM contrato_itens ci WHERE ci.contrato_id = ct.id AND ci.faturavel AND ci.valor_unitario IS NOT NULL) AS itens_preco,
             (SELECT nome FROM empresas em WHERE em.id = ct.empresa_id) AS empresa,
             count(e.id)::int AS enderecos,
             count(e.id) FILTER (WHERE ${APTO})::int AS aptos,
             COALESCE(sum(${VALOR}) FILTER (WHERE ${APTO}), 0)::float AS valor_apto,
             COALESCE(sum(${VALOR}), 0)::float AS valor_total,
             count(e.id) FILTER (WHERE EXISTS (SELECT 1 FROM medicao_enderecos me WHERE me.endereco_id = e.id))::int AS medidos,
+            count(e.id) FILTER (WHERE e.concluido_em IS NOT NULL)::int AS concluidos,
+            COALESCE(sum(${VALOR}) FILTER (WHERE e.concluido_em IS NOT NULL), 0)::float AS valor_gerado,
             ct.criado_em,
             (SELECT COALESCE(sum(valor_total),0)::float FROM medicoes m WHERE m.contrato_id = ct.id AND m.status IN ('aberta','enviada','aprovada')) AS em_andamento,
             (SELECT COALESCE(sum(valor_total),0)::float FROM medicoes m WHERE m.contrato_id = ct.id AND m.status IN ('nf_emitida','recebida')) AS faturado,
@@ -39,14 +53,25 @@ module.exports = (app) => {
     const contrato = await db.one(`SELECT ct.*, cl.nome AS cliente, (SELECT nome FROM empresas em WHERE em.id = ct.empresa_id) AS empresa
                                      FROM contratos ct JOIN clientes cl ON cl.id = ct.cliente_id WHERE ct.id = $1`, [id]);
     if (!contrato) throw new HttpError(404, 'Contrato não encontrado');
-    const [aptos, medicoes] = await Promise.all([
-      db.many(`SELECT e.id, e.codigo, e.nome, e.municipio, e.uf, e.cameras, e.status, e.concluido_em, ${VALOR}::float AS valor
+    const [aptos, medicoes, itens, pendentes] = await Promise.all([
+      db.many(`SELECT e.id, e.codigo, e.nome, e.municipio, e.uf, e.cameras, e.status, e.concluido_em, ${VALOR}::float AS valor, ${DETALHE} AS detalhe
                  FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id WHERE ct.id = $1 AND ${APTO} ORDER BY e.uf, e.municipio, e.nome`, [id]),
       db.many(`SELECT m.*, (SELECT count(*)::int FROM medicao_enderecos me WHERE me.medicao_id = m.id) AS enderecos,
                       (SELECT COALESCE(sum(cameras),0)::int FROM medicao_enderecos me WHERE me.medicao_id = m.id) AS cameras
                  FROM medicoes m WHERE m.contrato_id = $1 ORDER BY m.competencia DESC, m.id DESC`, [id]),
+      // tabela de preços do contrato com o previsto e o já instalado (endereços concluídos)
+      db.many(`SELECT ci.id, ci.nome, ci.unidade, ci.faturavel, ci.valor_unitario::float AS valor_unitario, ci.controla_patrimonio,
+                      COALESCE(sum(ei.quantidade),0)::int AS previsto,
+                      COALESCE(sum(ei.quantidade) FILTER (WHERE e.concluido_em IS NOT NULL),0)::int AS concluido
+                 FROM contrato_itens ci LEFT JOIN endereco_itens ei ON ei.item_id = ci.id LEFT JOIN enderecos e ON e.id = ei.endereco_id
+                WHERE ci.contrato_id = $1 GROUP BY ci.id ORDER BY ci.ordem, ci.id`, [id]),
+      // passaram da etapa de cobrança mas falta patrimônio (só quando o contrato exige)
+      db.many(`SELECT e.id, e.nome, e.municipio, e.uf FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id
+                WHERE ct.id = $1 AND ct.exige_patrimonio AND EXISTS (${FALTA_PATRIMONIO})
+                  AND NOT EXISTS (SELECT 1 FROM medicao_enderecos me WHERE me.endereco_id = e.id)
+                  AND (e.concluido_em IS NOT NULL OR e.status IN ('Em validação','Faturado','Handover','Concluída')) ORDER BY e.nome LIMIT 200`, [id]),
     ]);
-    return { contrato, aptos, medicoes };
+    return { contrato, aptos, medicoes, itens, pendentes_patrimonio: pendentes };
   });
 
   app.post('/api/faturamento/contratos/:id/medicoes', escritorio, async (req) => db.tx(async (c) => {
@@ -62,6 +87,14 @@ module.exports = (app) => {
     const m = (await c.query(`INSERT INTO medicoes (contrato_id, competencia, observacao) VALUES ($1, $2, $3) RETURNING id`,
       [id, `${comp}-01`, v.str(req.body.observacao, 'a observação', { max: 1000, opcional: true })])).rows[0];
     for (const a of aptos) await c.query(`INSERT INTO medicao_enderecos (medicao_id, endereco_id, cameras, valor) VALUES ($1,$2,$3,$4)`, [m.id, a.id, a.cameras, a.valor]);
+    await c.query(
+      `INSERT INTO medicao_itens (medicao_id, endereco_id, item, quantidade, valor_unitario, total)
+       SELECT $1::bigint, ei.endereco_id, ci.nome, ei.quantidade::numeric, ci.valor_unitario, ei.quantidade * ci.valor_unitario
+         FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
+        WHERE ei.endereco_id = ANY($2::bigint[]) AND ci.faturavel AND ci.valor_unitario IS NOT NULL AND ei.quantidade > 0
+       UNION ALL
+       SELECT $1::bigint, e.id, 'Taxa por endereço', 1::numeric, ct.valor_endereco, ct.valor_endereco
+         FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id WHERE e.id = ANY($2::bigint[]) AND COALESCE(ct.valor_endereco,0) > 0`, [m.id, ids]);
     await totalizar(c, m.id);
     return m;
   }));
@@ -72,8 +105,12 @@ module.exports = (app) => {
                                    (SELECT nome FROM empresas em WHERE em.id = ct.empresa_id) AS empresa
                               FROM medicoes m JOIN contratos ct ON ct.id = m.contrato_id JOIN clientes cl ON cl.id = ct.cliente_id WHERE m.id = $1`, [id]);
     if (!m) throw new HttpError(404, 'Medição não encontrada');
-    m.itens = await db.many(`SELECT me.endereco_id, me.cameras, me.valor::float AS valor, e.codigo, e.nome, e.municipio, e.uf, e.status
+    m.itens = await db.many(`SELECT me.endereco_id, me.cameras, me.valor::float AS valor, e.codigo, e.nome, e.municipio, e.uf, e.status,
+                                    COALESCE((SELECT json_agg(json_build_object('item', mi.item, 'quantidade', mi.quantidade::float, 'valor_unitario', mi.valor_unitario::float, 'total', mi.total::float) ORDER BY mi.id)
+                                                FROM medicao_itens mi WHERE mi.medicao_id = me.medicao_id AND mi.endereco_id = me.endereco_id), '[]') AS detalhe
                                FROM medicao_enderecos me JOIN enderecos e ON e.id = me.endereco_id WHERE me.medicao_id = $1 ORDER BY e.uf, e.municipio, e.nome`, [id]);
+    m.resumo = await db.many(`SELECT item, sum(quantidade)::float AS quantidade, valor_unitario::float AS valor_unitario, sum(total)::float AS total
+                                FROM medicao_itens WHERE medicao_id = $1 GROUP BY item, valor_unitario ORDER BY min(id)`, [id]);
     return m;
   });
 
@@ -110,7 +147,9 @@ module.exports = (app) => {
     const m = (await c.query(`SELECT status FROM medicoes WHERE id = $1`, [id])).rows[0];
     if (!m) throw new HttpError(404, 'Medição não encontrada');
     if (m.status !== 'aberta') throw new HttpError(400, 'Só dá para tirar endereços de medição aberta');
-    await c.query(`DELETE FROM medicao_enderecos WHERE medicao_id = $1 AND endereco_id = $2`, [id, v.id(req.params.end, 'Endereço')]);
+    const end = v.id(req.params.end, 'Endereço');
+    await c.query(`DELETE FROM medicao_enderecos WHERE medicao_id = $1 AND endereco_id = $2`, [id, end]);
+    await c.query(`DELETE FROM medicao_itens WHERE medicao_id = $1 AND endereco_id = $2`, [id, end]);
     await totalizar(c, id);
     return { ok: true };
   }));
@@ -121,3 +160,8 @@ module.exports = (app) => {
     return { ok: true };
   });
 };
+
+// usados também no cadastro (valor de cada endereço) e no patrimônio
+module.exports.VALOR = VALOR;
+module.exports.DETALHE = DETALHE;
+module.exports.FALTA_PATRIMONIO = FALTA_PATRIMONIO;
