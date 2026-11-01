@@ -5,6 +5,7 @@ const { HttpError } = require('../http');
 const { requer, ESCRITORIO, INTERNOS, pode, podeAcao } = require('../auth');
 const { gerarRelatorio } = require('../relatorio');
 const { conferirConclusao } = require('../predecessora');
+const { criarExtra } = require('../extras');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATUS = ['a_fazer', 'em_andamento', 'aguardando', 'concluida'];
@@ -40,6 +41,11 @@ async function pendenciasChecklist(c, tarefa) {
 }
 
 async function aplicarAcao(c, user, a) {
+  // atividade extra incluída no campo (ex.: escavação, poste): nasce com o técnico como responsável
+  if (a.tipo === 'extra') {
+    await criarExtra(c, user, { endereco_id: a.endereco_id, atividade_id: a.atividade_id, quantidade: a.quantidade, motivo: a.motivo, em: a.em });
+    return;
+  }
   const tarefaId = v.id(a.tarefa_id, 'Atividade');
   const t = await tarefaDoUsuario(c, user, tarefaId);
   if (a.tipo === 'status') {
@@ -102,10 +108,10 @@ module.exports = (app) => {
   app.get('/api/mobile/sync', interno, async (req) => {
     const u = req.user;
     const base = { usuario: { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, pessoa_id: u.pessoa_id, acoes: u.perm ? u.perm.acoes : {} }, servidor_em: new Date().toISOString() };
-    if (!u.pessoa_id) return { ...base, tarefas: [], checklists: {}, respostas: {}, fotos: {}, patrimonio: {} };
+    if (!u.pessoa_id) return { ...base, tarefas: [], checklists: {}, respostas: {}, fotos: {}, patrimonio: {}, extras: {} };
     const tarefas = await db.many(
       `SELECT t.id, t.status, t.prevista_inicio, t.prevista_fim, t.realizada_inicio, t.realizada_fim, t.observacao, t.atualizado_em,
-              a.id AS atividade_id, a.nome AS atividade, a.etapa, a.checklist_id, a.evidencia,
+              a.id AS atividade_id, a.nome AS atividade, a.etapa, a.checklist_id, a.evidencia, t.extra, t.quantidade::float, t.motivo, e.contrato_id,
               (SELECT pa.nome FROM atividades pa WHERE pa.id = a.predecessora_id) AS pred_nome,
               (SELECT pt.status FROM tarefas pt WHERE pt.endereco_id = t.endereco_id AND pt.atividade_id = a.predecessora_id) AS pred_status,
               e.id AS endereco_id, e.codigo, e.nome AS endereco, e.logradouro, e.bairro, e.cep, e.municipio, e.uf, e.lat, e.lon,
@@ -146,7 +152,16 @@ module.exports = (app) => {
       for (const i of pit) (patrimonio[i.endereco_id] = patrimonio[i.endereco_id] || { itens: [], ativos: [] }).itens.push({ id: i.id, nome: i.nome, quantidade: i.quantidade });
       for (const x of pat) if (patrimonio[x.endereco_id]) patrimonio[x.endereco_id].ativos.push(x);
     }
-    return { ...base, tarefas, checklists, respostas, fotos: fotosPor, patrimonio };
+    // Atividades extras que o técnico pode incluir nos endereços (catálogo de cada contrato)
+    const cts = [...new Set(tarefas.map((t) => t.contrato_id))];
+    const extras = {};
+    if (cts.length && podeAcao(u, 'incluir_extra')) {
+      for (const x of await db.many(`SELECT a.id, a.nome, a.contrato_id, ci.nome AS item FROM atividades a LEFT JOIN contrato_itens ci ON ci.id = a.item_id
+                                      WHERE a.contrato_id = ANY($1) AND a.ativo AND a.extra ORDER BY a.ordem, a.nome`, [cts])) {
+        (extras[x.contrato_id] = extras[x.contrato_id] || []).push({ id: x.id, nome: x.nome, item: x.item });
+      }
+    }
+    return { ...base, tarefas, checklists, respostas, fotos: fotosPor, patrimonio, extras };
   });
 
   // Fila de ações feitas offline: [{ id(uuid), tipo, tarefa_id, ... }]

@@ -555,3 +555,21 @@ a.pjedit{text-decoration:none}
 .rec-tip span b{color:var(--ink)}
 .rec-tab{border-top:1px solid var(--line)}
 @media (max-width:640px){.rec-col>span{font-size:.6rem;writing-mode:vertical-rl;transform:rotate(180deg)}.rec-ch{gap:3px;height:210px}}
+
+/* Atividades extras no endereço (escavação, poste…) */
+.xtag{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.02em;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);vertical-align:middle;text-transform:uppercase}
+.xcol{display:flex;flex-direction:column;gap:5px;align-items:stretch}
+.xchip{display:flex;align-items:center;gap:6px;width:100%;text-align:left;padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--panel);font:inherit;font-size:.8rem;cursor:pointer;color:var(--ink)}
+.xchip:hover{border-color:var(--accent)}
+.xchip .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xchip i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted)}
+.xchip.em_andamento i{background:var(--info)}.xchip.aguardando i{background:var(--warn)}.xchip.concluida i{background:var(--ok)}
+.xchip small{color:var(--muted);white-space:nowrap}
+.xadd{border:1px dashed var(--line);background:none;border-radius:8px;padding:4px 8px;font:inherit;font-size:.78rem;color:var(--muted);cursor:pointer;text-align:left}
+.xadd:hover{border-color:var(--accent);color:var(--accent)}
+.xinfo{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:.88rem}
+.xinfo b{color:var(--ink)}
+.xopc{display:grid;gap:6px;margin-bottom:12px}
+.xopc label{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.xopc label:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.xopc small{display:block;color:var(--muted)}

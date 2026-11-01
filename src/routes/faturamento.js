@@ -9,18 +9,29 @@ const { requer, ESCRITORIO } = require('../auth');
 const FALTA_PATRIMONIO = `SELECT 1 FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
    WHERE ei.endereco_id = e.id AND ci.controla_patrimonio AND ei.quantidade >
      (SELECT count(*) FROM ativos a WHERE a.endereco_id = e.id AND a.item_id = ci.id AND a.status = 'instalado')`;
+// Atividade extra com item faturável ainda não concluída no endereço (segura a medição até ser concluída)
+const FALTA_EXTRA = `SELECT 1 FROM tarefas t JOIN atividades a ON a.id = t.atividade_id JOIN contrato_itens ci ON ci.id = a.item_id
+   WHERE t.endereco_id = e.id AND t.extra AND t.status <> 'concluida' AND ci.faturavel AND ci.valor_unitario IS NOT NULL`;
+// Extras concluídas com item faturável: quantidade da tarefa × preço do item
+const EXTRAS = `SELECT t.endereco_id, ci.nome || ' · extra: ' || a.nome AS item, t.quantidade, ci.valor_unitario, ci.ordem, t.id
+   FROM tarefas t JOIN atividades a ON a.id = t.atividade_id JOIN contrato_itens ci ON ci.id = a.item_id
+  WHERE t.extra AND t.status = 'concluida' AND ci.faturavel AND ci.valor_unitario IS NOT NULL`;
 // Endereço apto: passou da etapa exigida pela regra do contrato e ainda não está em nenhuma medição
 const APTO = `(CASE ct.regra_cobranca
     WHEN 'apos_handover' THEN e.status IN ('Handover','Concluída') OR e.concluido_em IS NOT NULL
     ELSE e.status IN ('Em validação','Faturado','Handover','Concluída') OR e.concluido_em IS NOT NULL END)
   AND NOT EXISTS (SELECT 1 FROM medicao_enderecos me WHERE me.endereco_id = e.id)
-  AND (NOT ct.exige_patrimonio OR NOT EXISTS (${FALTA_PATRIMONIO}))`;
+  AND (NOT ct.exige_patrimonio OR NOT EXISTS (${FALTA_PATRIMONIO}))
+  AND NOT EXISTS (${FALTA_EXTRA})`;
 const VALOR = `(COALESCE(ct.valor_endereco,0) + COALESCE((SELECT sum(ei.quantidade * ci.valor_unitario) FROM endereco_itens ei
-    JOIN contrato_itens ci ON ci.id = ei.item_id WHERE ei.endereco_id = e.id AND ci.faturavel AND ci.valor_unitario IS NOT NULL), 0))`;
+    JOIN contrato_itens ci ON ci.id = ei.item_id WHERE ei.endereco_id = e.id AND ci.faturavel AND ci.valor_unitario IS NOT NULL), 0)
+  + COALESCE((SELECT sum(x.quantidade * x.valor_unitario) FROM (${EXTRAS}) x WHERE x.endereco_id = e.id), 0))`;
 // Itens faturáveis do endereço, para mostrar de onde vem o valor
-const DETALHE = `COALESCE((SELECT json_agg(json_build_object('item', ci.nome, 'quantidade', ei.quantidade, 'valor_unitario', ci.valor_unitario,
-    'total', ei.quantidade * ci.valor_unitario) ORDER BY ci.ordem, ci.id) FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
-   WHERE ei.endereco_id = e.id AND ci.faturavel AND ci.valor_unitario IS NOT NULL AND ei.quantidade > 0), '[]')`;
+const DETALHE = `COALESCE((SELECT json_agg(json_build_object('item', d.item, 'quantidade', d.quantidade, 'valor_unitario', d.valor_unitario,
+    'total', d.quantidade * d.valor_unitario, 'extra', d.extra) ORDER BY d.extra, d.ordem, d.id) FROM (
+      SELECT ci.nome AS item, ei.quantidade::numeric AS quantidade, ci.valor_unitario, ci.ordem, ci.id, false AS extra FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
+       WHERE ei.endereco_id = e.id AND ci.faturavel AND ci.valor_unitario IS NOT NULL AND ei.quantidade > 0
+      UNION ALL SELECT x.item, x.quantidade, x.valor_unitario, x.ordem, x.id, true FROM (${EXTRAS}) x WHERE x.endereco_id = e.id) d), '[]')`;
 const FLUXO = { aberta: 'enviada', enviada: 'aprovada', aprovada: 'nf_emitida', nf_emitida: 'recebida' };
 
 async function totalizar(c, medId) {
@@ -75,7 +86,7 @@ module.exports = (app) => {
     const contrato = await db.one(`SELECT ct.*, cl.nome AS cliente, (SELECT nome FROM empresas em WHERE em.id = ct.empresa_id) AS empresa
                                      FROM contratos ct JOIN clientes cl ON cl.id = ct.cliente_id WHERE ct.id = $1`, [id]);
     if (!contrato) throw new HttpError(404, 'Contrato não encontrado');
-    const [aptos, medicoes, itens, pendentes] = await Promise.all([
+    const [aptos, medicoes, itens, pendentes, pendExtra] = await Promise.all([
       db.many(`SELECT e.id, e.codigo, e.nome, e.municipio, e.uf, e.cameras, e.status, e.concluido_em, ${VALOR}::float AS valor, ${DETALHE} AS detalhe
                  FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id WHERE ct.id = $1 AND ${APTO} ORDER BY e.uf, e.municipio, e.nome`, [id]),
       db.many(`SELECT m.*, (SELECT count(*)::int FROM medicao_enderecos me WHERE me.medicao_id = m.id) AS enderecos,
@@ -84,7 +95,9 @@ module.exports = (app) => {
       // tabela de preços do contrato com o previsto e o já instalado (endereços concluídos)
       db.many(`SELECT ci.id, ci.nome, ci.unidade, ci.faturavel, ci.valor_unitario::float AS valor_unitario, ci.controla_patrimonio,
                       COALESCE(sum(ei.quantidade),0)::int AS previsto,
-                      COALESCE(sum(ei.quantidade) FILTER (WHERE e.concluido_em IS NOT NULL),0)::int AS concluido
+                      COALESCE(sum(ei.quantidade) FILTER (WHERE e.concluido_em IS NOT NULL),0)::int AS concluido,
+                      (SELECT COALESCE(sum(t.quantidade),0)::float FROM tarefas t JOIN atividades a ON a.id = t.atividade_id WHERE a.item_id = ci.id AND t.extra AND t.status = 'concluida') AS extra_concluido,
+                      (SELECT COALESCE(sum(t.quantidade),0)::float FROM tarefas t JOIN atividades a ON a.id = t.atividade_id WHERE a.item_id = ci.id AND t.extra AND t.status <> 'concluida') AS extra_aberto
                  FROM contrato_itens ci LEFT JOIN endereco_itens ei ON ei.item_id = ci.id LEFT JOIN enderecos e ON e.id = ei.endereco_id
                 WHERE ci.contrato_id = $1 GROUP BY ci.id ORDER BY ci.ordem, ci.id`, [id]),
       // passaram da etapa de cobrança mas falta patrimônio (só quando o contrato exige)
@@ -92,8 +105,15 @@ module.exports = (app) => {
                 WHERE ct.id = $1 AND ct.exige_patrimonio AND EXISTS (${FALTA_PATRIMONIO})
                   AND NOT EXISTS (SELECT 1 FROM medicao_enderecos me WHERE me.endereco_id = e.id)
                   AND (e.concluido_em IS NOT NULL OR e.status IN ('Em validação','Faturado','Handover','Concluída')) ORDER BY e.nome LIMIT 200`, [id]),
+      // passaram da etapa de cobrança mas têm atividade extra faturável em aberto
+      db.many(`SELECT e.id, e.nome, e.municipio, e.uf,
+                      (SELECT string_agg(a.nome, ', ') FROM tarefas t JOIN atividades a ON a.id = t.atividade_id WHERE t.endereco_id = e.id AND t.extra AND t.status <> 'concluida') AS extras
+                 FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id
+                WHERE ct.id = $1 AND EXISTS (${FALTA_EXTRA})
+                  AND NOT EXISTS (SELECT 1 FROM medicao_enderecos me WHERE me.endereco_id = e.id)
+                  AND (e.concluido_em IS NOT NULL OR e.status IN ('Em validação','Faturado','Handover','Concluída')) ORDER BY e.nome LIMIT 200`, [id]),
     ]);
-    return { contrato, aptos, medicoes, itens, pendentes_patrimonio: pendentes };
+    return { contrato, aptos, medicoes, itens, pendentes_patrimonio: pendentes, pendentes_extra: pendExtra };
   });
 
   app.post('/api/faturamento/contratos/:id/medicoes', escritorio, async (req) => db.tx(async (c) => {
@@ -114,6 +134,8 @@ module.exports = (app) => {
        SELECT $1::bigint, ei.endereco_id, ci.nome, ei.quantidade::numeric, ci.valor_unitario, ei.quantidade * ci.valor_unitario
          FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
         WHERE ei.endereco_id = ANY($2::bigint[]) AND ci.faturavel AND ci.valor_unitario IS NOT NULL AND ei.quantidade > 0
+       UNION ALL
+       SELECT $1::bigint, x.endereco_id, x.item, x.quantidade, x.valor_unitario, x.quantidade * x.valor_unitario FROM (${EXTRAS}) x WHERE x.endereco_id = ANY($2::bigint[])
        UNION ALL
        SELECT $1::bigint, e.id, 'Taxa por endereço', 1::numeric, ct.valor_endereco, ct.valor_endereco
          FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id WHERE e.id = ANY($2::bigint[]) AND COALESCE(ct.valor_endereco,0) > 0`, [m.id, ids]);

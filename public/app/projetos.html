@@ -177,7 +177,9 @@ function render() {
     (!q || (e.nome + ' ' + e.municipio + ' ' + (e.codigo || '')).toLowerCase().includes(q)) &&
     (!filtro.resp || e.tarefas.some((t) => (filtro.resp === 'none' ? !t.responsavel_id : String(t.responsavel_id) === filtro.resp))));
   const itensCt = proj.itens || [];
-  const cols = `minmax(210px,1.3fr) minmax(170px,230px) 150px repeat(${proj.atividades.length}, minmax(150px,1fr))`;
+  const podeExtra = Shell.acao('incluir_extra') && Shell.pode('projetos', 'editar');
+  const temExtras = podeExtra || all.some((t) => t.extra);
+  const cols = `minmax(210px,1.3fr) minmax(170px,230px) 150px${temExtras ? ' minmax(190px,240px)' : ''} repeat(${proj.atividades.length}, minmax(150px,1fr))`;
   S.content.innerHTML = `
     <div class="kpis">
       <div class="kpi"><span>Endereços</span><b>${RP.fmtN(proj.enderecos.length)}</b></div>
@@ -195,11 +197,12 @@ function render() {
         <span class="spacer"></span><span class="muted">${ends.length} endereço(s)</span>
       </header>
       <div class="scroll" style="max-height:calc(100vh - 330px)">
-        <div class="matrix" style="grid-template-columns:${cols};min-width:${590 + proj.atividades.length * 150}px">
-          <div class="mh">Endereço</div><div class="mh" title="Quantidade de cada item do contrato neste endereço · role para o lado">Itens do contrato</div><div class="mh" title="Subir os ativos para o Zabbix depois que todas as atividades forem concluídas">Monitoramento</div>${proj.atividades.map((a) => `<div class="mh" title="${RP.esc(a.nome)}">${RP.esc(a.curto || a.nome)}</div>`).join('')}
+        <div class="matrix" style="grid-template-columns:${cols};min-width:${590 + (temExtras ? 200 : 0) + proj.atividades.length * 150}px">
+          <div class="mh">Endereço</div><div class="mh" title="Quantidade de cada item do contrato neste endereço · role para o lado">Itens do contrato</div><div class="mh" title="Subir os ativos para o Zabbix depois que todas as atividades forem concluídas">Monitoramento</div>${temExtras ? '<div class="mh" title="Atividades incluídas só neste endereço (ex.: escavação, poste), com quantidade e motivo">Extras do endereço</div>' : ''}${proj.atividades.map((a) => `<div class="mh" title="${RP.esc(a.nome)}">${RP.esc(a.curto || a.nome)}</div>`).join('')}
           ${ends.map((e) => `<div class="mc"><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.municipio)}/${e.uf} · ${RP.esc(e.status)}${e.tarefas.some((t) => t.fotos) ? ` · <a href="/api/enderecos/${e.id}/evidencias.zip" title="Baixar fotos e relatórios deste endereço">evidências</a>` : ''}</div>${e.etapa ? `<div style="font-size:.78rem;color:var(--accent)">${RP.esc(e.etapa)}${e.ordem_etapa ? ' · ' + e.ordem_etapa + 'º' : ''} · início ${RP.fmtData(e.etapa_inicio)}</div>` : ''}</div>
             <div class="mc"><div class="itroll" tabindex="0" aria-label="Itens do contrato em ${RP.esc(e.nome)}">${itensCt.length ? itensCt.map((i) => { const n = (e.itens || {})[i.id] || 0; return `<span class="itq${n ? '' : ' z'}" title="${RP.esc(i.nome)}: ${n}"><b>${RP.fmtN(n)}</b>${RP.esc(i.nome)}</span>`; }).join('') : `<span class="itq"><b>${RP.fmtN(e.cameras)}</b>Câmeras</span>`}</div></div>
             <div class="mc">${monChip(e)}</div>
+            ${temExtras ? `<div class="mc"><div class="xcol">${e.tarefas.filter((t) => t.extra).map((t) => `<button type="button" class="xchip ${t.status}" data-t="${t.id}" title="${RP.esc(t.atividade)} · ${ST[t.status]}${t.responsavel ? ' · ' + RP.esc(t.responsavel) : ''}${t.motivo ? ' · ' + RP.esc(t.motivo) : ''}"><i></i><span class="n">${RP.esc(t.curto || t.atividade)}</span><small>×${fmtQ(t.quantidade)}</small></button>`).join('')}${podeExtra ? `<button type="button" class="xadd" data-xadd="${e.id}">+ Extra</button>` : ''}</div></div>` : ''}
             ${proj.atividades.map((a) => { const t = e.tarefas.find((x) => x.atividade_id === a.id); if (!t) return '<div class="mc"></div>';
               const pre = a.predecessora_id && t.status !== 'concluida' ? e.tarefas.find((x) => x.atividade_id === a.predecessora_id) : null;
               const bloq = pre && pre.status !== 'concluida' ? proj.atividades.find((x) => x.id === a.predecessora_id) : null;
@@ -217,7 +220,8 @@ function render() {
   RP.$('#uf').onchange = (e) => { filtro.uf = e.target.value; render(); };
   RP.$('#resp').onchange = (e) => { filtro.resp = e.target.value; render(); };
   RP.$('#fet')?.addEventListener('change', (e) => { filtro.et = e.target.value; render(); });
-  RP.$$('.cell', S.content).forEach((b) => (b.onclick = () => editar(+b.dataset.t)));
+  RP.$$('.cell, .xchip', S.content).forEach((b) => (b.onclick = () => editar(+b.dataset.t)));
+  RP.$$('[data-xadd]', S.content).forEach((b) => (b.onclick = () => novaExtra(+b.dataset.xadd)));
   RP.$$('[data-mon]', S.content).forEach((b) => (b.onclick = () => monitorar(+b.dataset.mon)));
 }
 
@@ -388,9 +392,15 @@ const checklistHtml = (c) => RP.checklistHtml(c);
 async function editar(tid) {
   let t, e;
   for (const en of proj.enderecos) { const x = en.tarefas.find((y) => y.id === tid); if (x) { t = x; e = en; break; } }
-  const a = proj.atividades.find((x) => x.id === t.atividade_id);
+  const a = proj.atividades.find((x) => x.id === t.atividade_id) || { nome: t.atividade, id: t.atividade_id };
+  const gestorX = Shell.pode('projetos', 'editar');
   const d = RP.drawer(a.nome, `
     <p class="muted" style="margin-top:0">${RP.esc(e.nome)} · ${RP.esc(e.municipio)}/${e.uf} · ${e.cameras} câmeras</p>
+    ${t.extra ? `<div class="xinfo"><span class="xtag">Extra</span> Incluída por <b>${RP.esc(t.solicitado_por_nome || '—')}</b>${t.solicitado_em ? ' em ' + RP.fmtDataHora(t.solicitado_em) : ''}.
+      ${t.item_nome ? `<br>Fatura ao concluir: <b>${RP.esc(t.item_nome)}</b>${t.item_valor != null ? ` · ${brl(t.item_valor)} × ${fmtQ(t.quantidade)} = <b>${brl(t.item_valor * t.quantidade)}</b>` : ' · item sem preço'}` : '<br>Só registro (não fatura).'}
+      <div class="row" style="margin-top:10px"><div class="field" style="flex:1;margin:0"><label for="d-q">Quantidade</label><input class="input" id="d-q" inputmode="decimal" value="${fmtQ(t.quantidade)}" ${gestorX || (t.solicitado_por === user.id && t.status !== 'concluida') ? '' : 'disabled'}></div>
+        <div class="field" style="flex:3;margin:0"><label for="d-mo">Motivo</label><input class="input" id="d-mo" value="${RP.esc(t.motivo || '')}" placeholder="Ex.: fachada sem ponto de fixação" ${gestorX || (t.solicitado_por === user.id && t.status !== 'concluida') ? '' : 'disabled'}></div></div>
+      ${Shell.acao('excluir') || (t.solicitado_por === user.id && t.status === 'a_fazer') ? '<button type="button" class="btn sm danger" id="d-xdel" style="margin-top:10px">Remover do endereço</button>' : ''}</div>` : ''}
     <div class="field"><label for="d-resp">Responsável</label><select class="input" id="d-resp">${opcoesPessoas(t.responsavel_id)}</select>
       <small>Pode ser técnico, coordenação ou alguém do administrativo (ex.: handover).</small></div>
     <div class="field"><label for="d-st">Status</label><select class="input" id="d-st" ${t.status === 'concluida' && !Shell.acao('reabrir') ? 'disabled title="Só a coordenação ou a supervisão reabre atividade concluída"' : ''}>${Object.entries(ST).map(([k, v]) => `<option value="${k}" ${k === t.status ? 'selected' : ''}>${v}</option>`).join('')}</select>${t.status === 'concluida' ? `<small>${Shell.acao('reabrir') ? 'Concluída. Para reabrir, escolha outro status (fica registrado no histórico).' : '🔒 Concluída. Só a coordenação ou a supervisão pode reabrir.'}</small>` : ''}</div>
@@ -415,15 +425,25 @@ async function editar(tid) {
       const s = RP.$('#d-st', el).value; if (s !== t.status) body.status = s;
       const i = RP.$('#d-i', el).value || null, f = RP.$('#d-f', el).value || null;
       if (i !== (t.prevista_inicio || null) || f !== (t.prevista_fim || null)) { body.prevista_inicio = i; body.prevista_fim = f; }
+      if (t.extra && !RP.$('#d-q', el).disabled) {
+        const q = Number(RP.$('#d-q', el).value.replace(',', '.')), mo = RP.$('#d-mo', el).value.trim();
+        if (!(q > 0)) throw new Error('Quantidade inválida');
+        if (q !== t.quantidade) body.quantidade = q;
+        if (mo !== (t.motivo || '')) body.motivo = mo || null;
+      }
       if (Object.keys(body).length) {
         const n = await RP.api('/tarefas/' + tid, { method: 'PATCH', body });
-        Object.assign(t, { status: n.status, responsavel_id: n.responsavel_id, responsavel: n.responsavel, responsavel_tipo: n.responsavel_tipo, prevista_inicio: n.prevista_inicio, prevista_fim: n.prevista_fim });
+        Object.assign(t, { status: n.status, responsavel_id: n.responsavel_id, responsavel: n.responsavel, responsavel_tipo: n.responsavel_tipo, prevista_inicio: n.prevista_inicio, prevista_fim: n.prevista_fim, quantidade: Number(n.quantidade), motivo: n.motivo });
       }
       const c = RP.$('#d-c', el).value.trim();
       if (c) await RP.api(`/tarefas/${tid}/comentarios`, { method: 'POST', body: { texto: c } });
       render(); RP.toast('Atividade atualizada');
     },
   });
+  RP.$('#d-xdel', d.el)?.addEventListener('click', (ev) => RP.busy(ev.currentTarget, async () => {
+    if (!confirm(`Remover "${a.nome}" deste endereço? Fica registrado na auditoria.`)) return;
+    try { await RP.api('/tarefas/' + tid, { method: 'DELETE' }); e.tarefas = e.tarefas.filter((x) => x.id !== tid); d.close(); render(); RP.toast('Atividade extra removida'); } catch (er) { RP.toast(er.message); }
+  }));
   assinaturaBox(tid, RP.$('#d-ass', d.el));
   RP.api(`/tarefas/${tid}/checklist`).then((c) => { RP.$('#d-ck', d.el).innerHTML = checklistHtml(c); }).catch(() => { RP.$('#d-ck', d.el).textContent = ''; });
   const ev = await RP.api(`/tarefas/${tid}/eventos`);
@@ -431,6 +451,54 @@ async function editar(tid) {
     RP.$('#d-fotos', d.el).innerHTML = fs.length ? `<div class="row" style="gap:8px">${fs.map((f) => `<a href="/api/fotos/${f.id}" target="_blank" rel="noopener" title="${RP.esc((f.item || f.legenda || 'Foto') + ' · ' + RP.fmtDataHora(f.tirada_em || f.criado_em))}"><img src="/api/fotos/${f.id}" alt="${RP.esc(f.item || f.legenda || 'Foto')}" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line)" loading="lazy"></a>`).join('')}</div>` : 'Nenhuma foto enviada pelo app ainda.';
   }).catch(() => { RP.$('#d-fotos', d.el).textContent = ''; });
   RP.$('#d-h', d.el).innerHTML = ev.length ? ev.map((x) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b style="color:var(--ink)">${RP.esc(x.usuario || 'Sistema')}</b> · ${RP.fmtDataHora(x.criado_em)}<br>${x.tipo === 'comentario' ? '💬 ' : ''}${RP.esc(x.detalhe)}</div>`).join('') : 'Sem movimentações.';
+}
+
+const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const fmtQ = (n) => String(Math.round(Number(n) * 100) / 100).replace('.', ',');
+
+// Inclui uma atividade extra no endereço: da lista do contrato ou um tipo novo (com checklist e item faturado)
+async function novaExtra(eid) {
+  const e = proj.enderecos.find((x) => x.id === eid);
+  const usadas = new Set(e.tarefas.filter((t) => t.extra).map((t) => t.atividade_id));
+  const lista = (proj.extras || []).filter((x) => !usadas.has(x.id));
+  const criaTipo = Shell.pode('atividades', 'editar') || Shell.pode('projetos', 'editar');
+  const cks = await RP.api('/checklists').catch(() => []);
+  const itensCt = proj.itens || [];
+  const d = RP.drawer('Atividade extra · ' + e.nome, `
+    <p class="muted" style="margin-top:0">Para o que não estava previsto neste endereço (ex.: escavação, instalação de poste). Fica registrado quem incluiu, quando e por quê. Se tiver item faturado, entra no valor do endereço quando for concluída.</p>
+    <div class="xopc" role="radiogroup" aria-label="Atividade">
+      ${lista.map((x, i) => `<label><input type="radio" name="x-a" value="${x.id}" ${i === 0 ? 'checked' : ''}><span><b>${RP.esc(x.nome)}</b><small>${x.item_nome ? `Fatura: ${RP.esc(x.item_nome)}${x.item_valor != null ? ' · ' + brl(x.item_valor) + ' por unidade' : ' · sem preço'}` : 'Só registro (não fatura)'}${x.checklist_id ? ' · com checklist' : ''}</small></span></label>`).join('')}
+      ${criaTipo ? `<label><input type="radio" name="x-a" value="nova" ${lista.length ? '' : 'checked'}><span><b>Outra atividade…</b><small>Cria um tipo novo de extra neste contrato (fica disponível para os outros endereços)</small></span></label>` : ''}
+    </div>
+    ${!lista.length && !criaTipo ? '<div class="alert warn">Nenhuma atividade extra cadastrada neste contrato. Peça ao escritório para criar em Atividades.</div>' : ''}
+    <div id="x-nova" hidden>
+      <div class="field"><label for="x-n">Nome da atividade</label><input class="input" id="x-n" placeholder="Ex.: Instalação de poste"></div>
+      <div class="field"><label for="x-ck">Checklist</label><select class="input" id="x-ck"><option value="">Sem checklist</option>${cks.map((c) => `<option value="${c.id}">${RP.esc(c.nome)} (${c.itens.length} itens)</option>`).join('')}</select></div>
+      <div class="field"><label for="x-it">Faturar ao concluir</label><select class="input" id="x-it"><option value="">Não fatura (só registra)</option>${itensCt.map((i) => `<option value="${i.id}">${RP.esc(i.nome)}${i.valor_unitario != null ? ' · ' + brl(i.valor_unitario) : ' · sem preço'}</option>`).join('')}<option value="novo">+ Novo item com preço…</option></select>
+        <div id="x-novo" class="row" style="margin-top:8px" hidden><input class="input" id="x-in" placeholder="Item (ex.: Poste)" style="flex:2" aria-label="Nome do item"><input class="input" id="x-iu" placeholder="Unid." style="flex:1" aria-label="Unidade"><input class="input" id="x-iv" placeholder="Preço (R$)" inputmode="decimal" style="flex:1" aria-label="Preço por unidade"></div></div>
+    </div>
+    <div class="row"><div class="field" style="flex:1"><label for="x-q">Quantidade</label><input class="input" id="x-q" inputmode="decimal" value="1"><small>Ex.: 1 poste, 12,5 metros</small></div>
+      <div class="field" style="flex:2"><label for="x-r">Responsável</label><select class="input" id="x-r">${opcoesPessoas(null)}</select></div></div>
+    <div class="field"><label for="x-m">Motivo</label><textarea class="input" id="x-m" placeholder="Ex.: fachada sem ponto de fixação, câmera precisa de poste no estacionamento"></textarea></div>`, {
+    saveLabel: 'Incluir no endereço',
+    onSave: async (el) => {
+      const sel = RP.$('input[name="x-a"]:checked', el); if (!sel) throw new Error('Escolha a atividade');
+      const body = { endereco_id: eid, quantidade: RP.$('#x-q', el).value, motivo: RP.$('#x-m', el).value.trim() || null, responsavel_id: RP.$('#x-r', el).value ? +RP.$('#x-r', el).value : null };
+      if (sel.value === 'nova') {
+        const it = RP.$('#x-it', el).value;
+        body.nova = { nome: RP.$('#x-n', el).value.trim(), checklist_id: RP.$('#x-ck', el).value || null, item_id: it && it !== 'novo' ? +it : null,
+          item_novo: it === 'novo' ? { nome: RP.$('#x-in', el).value, unidade: RP.$('#x-iu', el).value, valor_unitario: RP.$('#x-iv', el).value } : undefined };
+        if (!body.nova.nome) throw new Error('Informe o nome da atividade');
+      } else body.atividade_id = +sel.value;
+      const r = await RP.api('/tarefas/extra', { method: 'POST', body });
+      RP.toast(r.endereco_medido ? 'Incluída. Atenção: este endereço já está numa medição, o valor da extra não entra nela.' : 'Atividade extra incluída');
+      await abrir(proj.contrato.id);
+    },
+  });
+  const el = d.el;
+  const tipo = () => { RP.$('#x-nova', el).hidden = RP.$('input[name="x-a"]:checked', el)?.value !== 'nova'; };
+  RP.$$('input[name="x-a"]', el).forEach((r) => (r.onchange = tipo)); tipo();
+  RP.$('#x-it', el).onchange = (ev) => { RP.$('#x-novo', el).hidden = ev.target.value !== 'novo'; };
 }
 
 // Assinatura do relatório pelo cliente: gera um link para enviar por WhatsApp ou e-mail

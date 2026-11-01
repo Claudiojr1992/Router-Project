@@ -180,7 +180,7 @@ module.exports = (app) => {
         }
       }
       if (novos.length) {
-        await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT e.id, a.id FROM enderecos e JOIN atividades a ON a.contrato_id = e.contrato_id AND a.ativo
+        await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT e.id, a.id FROM enderecos e JOIN atividades a ON a.contrato_id = e.contrato_id AND a.ativo AND NOT a.extra
                         WHERE e.id = ANY($1) ON CONFLICT DO NOTHING`, [novos]);
         await c.query(`UPDATE tarefas t SET responsavel_id = r.pessoa_id FROM regras_distribuicao r
                         WHERE t.endereco_id = ANY($1) AND r.contrato_id = $2 AND r.atividade_id = t.atividade_id AND r.pessoa_id IS NOT NULL`, [novos, contrato]);

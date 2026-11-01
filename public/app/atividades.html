@@ -13,7 +13,8 @@
 <body>
 <script>
 const IMPACTO = { soma: 'Soma no tempo', paralelo: 'Em paralelo (não soma)', nenhum: 'Sem impacto no prazo' };
-let S, clientes = [], checklists = [], cli = null, contratoSel = null, ativs = [];
+let S, clientes = [], checklists = [], cli = null, contratoSel = null, ativs = [], itens = [];
+const brl = (n) => Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const f = (id, label, v = '', extra = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${RP.esc(v ?? '')}" ${extra}></div>`;
 
 function tempoTxt(a) {
@@ -40,7 +41,7 @@ async function escolher(id, contrato = null) {
 }
 
 async function carregar() {
-  ativs = contratoSel ? await RP.api(`/contratos/${contratoSel}/atividades`) : [];
+  [ativs, itens] = contratoSel ? await Promise.all([RP.api(`/contratos/${contratoSel}/atividades`), RP.api(`/contratos/${contratoSel}/itens`).catch(() => [])]) : [[], []];
   render();
 }
 
@@ -51,11 +52,11 @@ function render() {
       <header class="toolbar">
         <select class="input" id="cl" aria-label="Cliente" style="max-width:260px">${clientes.map((c) => `<option value="${c.id}" ${c.id === cli.id ? 'selected' : ''}>${RP.esc(c.nome)}</option>`).join('')}</select>
         <select class="input" id="ct" aria-label="Contrato" ${cli.contratos.length ? '' : 'hidden'}>${cli.contratos.map((c) => `<option value="${c.id}" ${c.id === contratoSel ? 'selected' : ''}>${RP.esc(c.numero)} · ${c.enderecos} endereços</option>`).join('')}</select>
-        <span class="spacer"></span>${gestor && contratoSel ? '<button class="btn sm primary" id="na">+ Nova atividade</button>' : ''}
+        <span class="spacer"></span>${gestor && contratoSel ? '<button class="btn sm" id="nx" title="Atividade que só entra no endereço quando precisar (ex.: escavação, poste)">+ Atividade extra</button><button class="btn sm primary" id="na">+ Nova atividade</button>' : ''}
       </header>
       ${!contratoSel ? `<div class="empty"><p style="margin:0 0 12px">Este cliente ainda não tem contrato. Crie o contrato e os endereços em Clientes.</p><a class="btn primary" href="/app/clientes.html?id=${cli.id}&aba=enderecos">Ir para o cliente e criar o contrato</a></div>` : ativs.length ? `<div class="scroll"><table class="tbl">
         <thead><tr><th>#</th><th>Atividade</th><th>Fase</th><th>Quem executa</th><th>Tempo de execução</th><th>Impacto no tempo</th><th>Depende de</th><th>Checklist</th><th>Andamento</th></tr></thead>
-        <tbody>${ativs.map((a) => `<tr class="${gestor ? 'click' : ''}" data-id="${a.id}"><td>${a.ordem}</td><td><b>${RP.esc(a.nome)}</b>${a.evidencia ? `<div class="muted" style="font-size:.82rem">Evidência: ${RP.esc(a.evidencia)}</div>` : ''}</td>
+        <tbody>${ativs.map((a) => `<tr class="${gestor ? 'click' : ''}" data-id="${a.id}"><td>${a.ordem}</td><td><b>${RP.esc(a.nome)}</b>${a.extra ? ' <span class="xtag" title="Não entra em todos os endereços: é incluída no endereço quando aparece a necessidade">Extra</span>' : ''}${a.extra && a.item_nome ? `<div class="muted" style="font-size:.82rem">Fatura ao concluir: ${RP.esc(a.item_nome)}${a.item_valor != null ? ' · ' + brl(a.item_valor) + ' por unidade' : ' · sem preço'}</div>` : ''}${a.evidencia ? `<div class="muted" style="font-size:.82rem">Evidência: ${RP.esc(a.evidencia)}</div>` : ''}</td>
           <td>${RP.esc(a.etapa || '—')}</td><td>${RP.esc(a.funcao || '—')}</td><td>${RP.esc(tempoTxt(a))}</td><td>${IMPACTO[a.tempo_impacto || (a.conta_rota ? 'soma' : 'nenhum')]}</td><td>${a.predecessora_nome ? '🔒 ' + RP.esc(a.predecessora_nome) : '—'}</td><td>${RP.esc(a.checklist_nome || '—')}</td>
           <td><div class="row" style="gap:6px;flex-wrap:nowrap"><div class="bar" style="width:80px"><i style="width:${a.tarefas ? Math.round(a.concluidas / a.tarefas * 100) : 0}%"></i></div><span class="muted" style="font-size:.82rem">${a.concluidas}/${a.tarefas}</span></div></td></tr>`).join('')}</tbody></table></div>`
       : `<div class="empty"><p style="margin:0 0 12px">Nenhuma atividade neste contrato ainda.</p>${gestor ? '<button class="btn primary" id="padrao">Usar as atividades padrão</button> <span class="muted" style="margin:0 8px">ou</span> use “+ Nova atividade”.' : ''}</div>`}
@@ -67,14 +68,23 @@ function render() {
     try { await RP.api(`/contratos/${contratoSel}/atividades/padrao`, { method: 'POST' }); RP.toast('Atividades padrão incluídas'); await carregar(); } catch (er) { RP.toast(er.message); }
   }));
   RP.$('#na')?.addEventListener('click', () => editar(null));
+  RP.$('#nx')?.addEventListener('click', () => editar(null, true));
   if (gestor) RP.$$('tr.click', S.content).forEach((r) => (r.onclick = () => editar(ativs.find((a) => a.id === +r.dataset.id))));
 }
 
-function editar(a) {
-  const x = a || { tempo_modo: 'fixo', tempo_qtd: 1, tempo_unidade: 'dia', conta_rota: true, ordem: ativs.length + 1, faixas: [{ ate: 22, dias: 2 }, { ate: 32, dias: 3 }, { ate: null, dias: 4 }] };
+function editar(a, extra = false) {
+  const x = a || { tempo_modo: 'fixo', tempo_qtd: 1, tempo_unidade: 'dia', conta_rota: !extra, tempo_impacto: extra ? 'nenhum' : 'soma', extra, etapa: extra ? 'Extra' : '', ordem: ativs.length + 1, faixas: [{ ate: 22, dias: 2 }, { ate: 32, dias: 3 }, { ate: null, dias: 4 }] };
   const faixas = x.faixas || [{ ate: 22, dias: 2 }, { ate: 32, dias: 3 }, { ate: null, dias: 4 }];
-  const d = RP.drawer(a ? 'Editar atividade' : 'Nova atividade', `
-    ${f('a-nome', 'Nome da atividade', x.nome, 'required placeholder="Ex.: Instalação de equipamentos"')}
+  const d = RP.drawer(a ? 'Editar atividade' : x.extra ? 'Nova atividade extra' : 'Nova atividade', `
+    <div class="field"><label for="a-tipo">Tipo</label><select class="input" id="a-tipo">
+      <option value="padrao" ${x.extra ? '' : 'selected'}>Padrão: entra em todos os endereços</option>
+      <option value="extra" ${x.extra ? 'selected' : ''}>Extra: incluída no endereço quando precisar</option></select>
+      <small id="a-tipo-h"></small></div>
+    ${f('a-nome', 'Nome da atividade', x.nome, `required placeholder="${x.extra ? 'Ex.: Instalação de poste, Escavação' : 'Ex.: Instalação de equipamentos'}"`)}
+    <div id="a-fat" class="field"><label for="a-item">Faturar ao concluir</label><select class="input" id="a-item"><option value="">Não fatura (só registra)</option>
+      ${itens.map((i) => `<option value="${i.id}" ${i.id === x.item_id ? 'selected' : ''}>${RP.esc(i.nome)}${i.valor_unitario != null ? ' · ' + brl(i.valor_unitario) : ' · sem preço'}</option>`).join('')}<option value="novo">+ Novo item com preço…</option></select>
+      <div id="a-novo" class="row" style="margin-top:8px" hidden><input class="input" id="a-in" placeholder="Item (ex.: Poste)" style="flex:2" aria-label="Nome do item"><input class="input" id="a-iu" placeholder="Unid. (un, m)" style="flex:1" aria-label="Unidade"><input class="input" id="a-iv" placeholder="Preço (R$)" inputmode="decimal" style="flex:1" aria-label="Preço por unidade"></div>
+      <small>Quantidade da atividade no endereço × preço do item entra no valor do endereço quando ela é concluída. Enquanto não for concluída, o endereço não entra na medição.</small></div>
     <div class="row"><div style="flex:1">${f('a-curto', 'Nome curto', x.curto, 'placeholder="Ex.: Instalação"')}</div><div style="flex:1">${f('a-ordem', 'Ordem', x.ordem, 'type="number" min="0"')}</div></div>
     <div class="row"><div style="flex:1">${f('a-etapa', 'Fase da atividade', x.etapa, 'placeholder="Ex.: Campo, Configuração, Entrega"')}</div><div style="flex:1">${f('a-func', 'Quem executa', x.funcao, 'placeholder="Ex.: Técnico de campo"')}</div></div>
     <div class="field"><label for="a-modo">Tempo para execução</label><select class="input" id="a-modo">
@@ -100,14 +110,22 @@ function editar(a) {
       const v = (id) => RP.$('#' + id, el).value;
       const body = { nome: v('a-nome'), curto: v('a-curto'), ordem: v('a-ordem') || 0, etapa: v('a-etapa'), funcao: v('a-func'), tempo_modo: v('a-modo'),
         tempo_qtd: (v('a-qtd') || '0').replace(',', '.'), tempo_unidade: v('a-un'), min_por_camera: v('a-mpc'), tempo_impacto: v('a-imp'), conta_rota: v('a-imp') !== 'nenhum', predecessora_id: v('a-pre') || null,
-        checklist_id: v('a-ck') || null, evidencia: v('a-ev'),
+        checklist_id: v('a-ck') || null, evidencia: v('a-ev'), extra: v('a-tipo') === 'extra',
+        item_id: v('a-tipo') === 'extra' && v('a-item') && v('a-item') !== 'novo' ? +v('a-item') : null,
+        item_novo: v('a-tipo') === 'extra' && v('a-item') === 'novo' ? { nome: v('a-in'), unidade: v('a-iu'), valor_unitario: v('a-iv') } : undefined,
         faixas: faixas.map((fx, i) => ({ ate: fx.ate === null ? null : RP.$(`[data-fa="${i}"]`, el).value, dias: RP.$(`[data-fd="${i}"]`, el).value.replace(',', '.') })) };
+      if (body.item_novo && !body.item_novo.nome.trim()) throw new Error('Informe o nome do item a faturar');
+      if (a && a.extra !== body.extra && !confirm(body.extra ? 'Virar extra: a atividade sai dos endereços onde ainda não foi iniciada nem tem responsável. Continuar?' : 'Virar padrão: a atividade entra em todos os endereços do contrato. Continuar?')) return false;
       if (a) await RP.api('/atividades/' + a.id, { method: 'PUT', body }); else await RP.api(`/contratos/${contratoSel}/atividades`, { method: 'POST', body });
       RP.toast('Atividade salva'); carregar();
     },
   });
   const modo = () => { const m = RP.$('#a-modo', d.el).value; RP.$('#m-fixo', d.el).hidden = m !== 'fixo'; RP.$('#m-cam', d.el).hidden = m !== 'por_camera'; RP.$('#m-faixa', d.el).hidden = m !== 'faixa'; };
   RP.$('#a-modo', d.el).onchange = modo; modo();
+  const tipo = () => { const ex = RP.$('#a-tipo', d.el).value === 'extra'; RP.$('#a-fat', d.el).hidden = !ex;
+    RP.$('#a-tipo-h', d.el).textContent = ex ? 'Não aparece nos endereços sozinha. Na Execução (ou no app do técnico) use “+ Extra” no endereço, com quantidade e motivo.' : 'Cria uma tarefa desta atividade em cada endereço do contrato.'; };
+  RP.$('#a-tipo', d.el).onchange = tipo; tipo();
+  RP.$('#a-item', d.el).onchange = (e) => { RP.$('#a-novo', d.el).hidden = e.target.value !== 'novo'; if (e.target.value === 'novo') RP.$('#a-in', d.el).focus(); };
   RP.$('#a-del', d.el)?.addEventListener('click', async () => {
     if (!confirm('Remover esta atividade? As tarefas dela deixam de aparecer nos projetos.')) return;
     await RP.api('/atividades/' + a.id, { method: 'DELETE' }); d.close(); RP.toast('Atividade removida'); carregar();

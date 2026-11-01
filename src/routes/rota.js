@@ -36,7 +36,7 @@ async function carregar(clienteId) {
   const [etapas, ativs] = await Promise.all([
     db.many(`SELECT id, nome, data_inicio FROM etapas WHERE cliente_id = $1 ORDER BY data_inicio, ordem, id`, [clienteId]),
     db.many(`SELECT a.contrato_id, a.tempo_modo, a.tempo_qtd, a.tempo_unidade, a.min_por_camera, a.faixas, a.tempo_impacto
-               FROM atividades a JOIN contratos ct ON ct.id = a.contrato_id WHERE ct.cliente_id = $1 AND a.ativo`, [clienteId]),
+               FROM atividades a JOIN contratos ct ON ct.id = a.contrato_id WHERE ct.cliente_id = $1 AND a.ativo AND NOT a.extra`, [clienteId]),
   ]);
   const atividades = {};
   for (const a of ativs) (atividades[a.contrato_id] = atividades[a.contrato_id] || []).push(a);

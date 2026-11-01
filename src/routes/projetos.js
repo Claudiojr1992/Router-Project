@@ -4,6 +4,7 @@ const v = require('../validate');
 const { HttpError } = require('../http');
 const { requer, GESTAO, ESCRITORIO, INTERNOS, pode, podeAcao } = require('../auth');
 const { conferirConclusao } = require('../predecessora');
+const { criarExtra, alterarExtra, removerExtra } = require('../extras');
 
 const STATUS = ['a_fazer', 'em_andamento', 'aguardando', 'concluida'];
 
@@ -35,13 +36,15 @@ module.exports = (app) => {
     const contrato = await db.one(
       `SELECT ct.*, cl.nome AS cliente FROM contratos ct JOIN clientes cl ON cl.id = ct.cliente_id WHERE ct.id = $1`, [id]);
     if (!contrato) throw new HttpError(404, 'Projeto não encontrado');
-    const [atividades, enderecos, tarefas, regras, itens] = await Promise.all([
-      db.many(`SELECT id, nome, curto, etapa, funcao, ordem, predecessora_id, tempo_impacto FROM atividades WHERE contrato_id = $1 AND ativo ORDER BY ordem, id`, [id]),
+    const [atividades, enderecos, tarefas, regras, itens, extras] = await Promise.all([
+      db.many(`SELECT id, nome, curto, etapa, funcao, ordem, predecessora_id, tempo_impacto FROM atividades WHERE contrato_id = $1 AND ativo AND NOT extra ORDER BY ordem, id`, [id]),
       db.many(`SELECT e.id, e.ref_id, e.codigo, e.nome, e.municipio, e.uf, e.cameras, e.status, e.etapa_id, e.ordem_etapa, et.nome AS etapa, et.data_inicio AS etapa_inicio
                  FROM enderecos e LEFT JOIN etapas et ON et.id = e.etapa_id WHERE e.contrato_id = $1 ORDER BY et.data_inicio NULLS LAST, e.ordem_etapa NULLS LAST, e.uf, e.municipio, e.nome`, [id]),
       db.many(
         `SELECT t.id, t.endereco_id, t.atividade_id, t.status, t.responsavel_id, t.prevista_inicio, t.prevista_fim, t.atualizado_em,
                 t.realizada_inicio, t.realizada_fim, p.nome AS responsavel, p.tipo AS responsavel_tipo, a.checklist_id,
+                t.extra, t.quantidade::float, t.motivo, t.solicitado_em, su.nome AS solicitado_por_nome, t.solicitado_por, a.nome AS atividade, a.curto,
+                ci.nome AS item_nome, ci.valor_unitario::float AS item_valor, ci.faturavel AS item_faturavel,
                 (SELECT count(*)::int FROM checklist_itens i WHERE i.checklist_id = a.checklist_id) AS ck_total,
                 (SELECT count(*)::int FROM checklist_itens i WHERE i.checklist_id = a.checklist_id AND (
                     EXISTS (SELECT 1 FROM checklist_respostas r WHERE r.tarefa_id = t.id AND r.item_id = i.id AND r.ok)
@@ -50,9 +53,15 @@ module.exports = (app) => {
            FROM tarefas t JOIN enderecos e ON e.id = t.endereco_id
            JOIN atividades a ON a.id = t.atividade_id AND a.ativo
            LEFT JOIN pessoas p ON p.id = t.responsavel_id
+           LEFT JOIN usuarios su ON su.id = t.solicitado_por
+           LEFT JOIN contrato_itens ci ON ci.id = a.item_id AND t.extra
           WHERE e.contrato_id = $1`, [id]),
       db.many(`SELECT r.*, p.nome AS pessoa FROM regras_distribuicao r LEFT JOIN pessoas p ON p.id = r.pessoa_id WHERE r.contrato_id = $1`, [id]),
-      db.many(`SELECT id, nome FROM contrato_itens WHERE contrato_id = $1 ORDER BY ordem, id`, [id]),
+      db.many(`SELECT id, nome, valor_unitario::float, faturavel FROM contrato_itens WHERE contrato_id = $1 ORDER BY ordem, id`, [id]),
+      // catálogo de atividades extras do contrato (incluídas sob demanda nos endereços)
+      db.many(`SELECT a.id, a.nome, a.checklist_id, a.item_id, ci.nome AS item_nome, ci.valor_unitario::float AS item_valor,
+                      (SELECT count(*)::int FROM tarefas t WHERE t.atividade_id = a.id) AS usos
+                 FROM atividades a LEFT JOIN contrato_itens ci ON ci.id = a.item_id WHERE a.contrato_id = $1 AND a.ativo AND a.extra ORDER BY a.ordem, a.nome`, [id]),
     ]);
     // quantidade de cada item do contrato por endereço
     const qtds = await db.many(`SELECT ei.endereco_id, ei.item_id, ei.quantidade FROM endereco_itens ei JOIN enderecos e ON e.id = ei.endereco_id
@@ -61,7 +70,7 @@ module.exports = (app) => {
     for (const t of tarefas) porEnd.get(t.endereco_id)?.tarefas.push(t);
     for (const e of enderecos) e.itens = {};
     for (const q of qtds) { const e = porEnd.get(q.endereco_id); if (e) e.itens[q.item_id] = q.quantidade; }
-    return { contrato, atividades, enderecos, regras, itens };
+    return { contrato, atividades, enderecos, regras, itens, extras };
   });
 
   // Atualiza uma tarefa: responsável, status, datas, observação
@@ -109,6 +118,7 @@ module.exports = (app) => {
           v.date(b.prevista_inicio !== undefined ? b.prevista_inicio : atual.prevista_inicio, 'A data prevista'),
           v.date(b.prevista_fim !== undefined ? b.prevista_fim : atual.prevista_fim, 'A data prevista'), id]);
       }
+      if (b.quantidade !== undefined || (b.motivo !== undefined && atual.extra)) await alterarExtra(c, u, atual, b);
       if (b.observacao !== undefined) {
         await c.query(`UPDATE tarefas SET observacao = $1, atualizado_em = now() WHERE id = $2`, [v.str(b.observacao, 'a observação', { max: 2000, opcional: true }), id]);
       }
@@ -116,6 +126,10 @@ module.exports = (app) => {
         `SELECT t.*, p.nome AS responsavel, p.tipo AS responsavel_tipo FROM tarefas t LEFT JOIN pessoas p ON p.id = t.responsavel_id WHERE t.id = $1`, [id])).rows[0];
     });
   });
+
+  // Atividade extra no endereço (escritório pela Execução, técnico pelo app)
+  app.post('/api/tarefas/extra', leitura, async (req) => db.tx((c) => criarExtra(c, req.user, req.body)));
+  app.delete('/api/tarefas/:id', leitura, async (req) => db.tx((c) => removerExtra(c, req.user, v.id(req.params.id))));
 
   // Distribui uma atividade em lote para uma pessoa (ou membro do time) e, opcionalmente, salva como regra do projeto
   app.post('/api/projetos/:id/distribuir', gestao, async (req) => {
@@ -156,7 +170,7 @@ module.exports = (app) => {
     const minhas = req.query.minhas === '1';
     if (minhas && !req.user.pessoa_id) return [];
     return db.many(
-      `SELECT t.id, t.status, t.prevista_fim, t.atualizado_em, t.observacao,
+      `SELECT t.id, t.status, t.prevista_fim, t.atualizado_em, t.observacao, t.extra, t.quantidade::float,
               a.nome AS atividade, a.evidencia, e.id AS endereco_id, e.nome AS endereco, e.municipio, e.uf, e.status AS endereco_status,
               ct.id AS contrato_id, ct.numero AS contrato, cl.nome AS cliente,
               p.id AS responsavel_id, p.nome AS responsavel, p.tipo AS responsavel_tipo, p.area
@@ -175,7 +189,7 @@ module.exports = (app) => {
   app.get('/api/minhas-tarefas', leitura, async (req) => {
     if (!req.user.pessoa_id) return [];
     return db.many(
-      `SELECT t.id, t.status, t.prevista_inicio, t.prevista_fim, t.atualizado_em, a.nome AS atividade, a.checklist_id, a.evidencia,
+      `SELECT t.id, t.status, t.prevista_inicio, t.prevista_fim, t.atualizado_em, a.nome AS atividade, a.checklist_id, a.evidencia, t.extra, t.quantidade::float,
               e.id AS endereco_id, e.nome AS endereco, e.municipio, e.uf, e.cameras, e.status AS endereco_status,
               ct.numero AS contrato, cl.nome AS cliente
          FROM tarefas t JOIN atividades a ON a.id = t.atividade_id AND a.ativo

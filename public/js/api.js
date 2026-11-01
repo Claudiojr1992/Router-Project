@@ -75,7 +75,7 @@ const RP = (() => {
       return saveBtn._salvar();
     };
     if (saveBtn) saveBtn._salvar = () => busy(saveBtn, async () => {
-      try { await onSave(d); close(); } catch (e) { showAlert(d.querySelector('.alert'), 'err', e.message); }
+      try { if ((await onSave(d)) !== false) close(); } catch (e) { showAlert(d.querySelector('.alert'), 'err', e.message); }
     });
     document.addEventListener('keydown', onKey);
     document.body.append(scrim, d);

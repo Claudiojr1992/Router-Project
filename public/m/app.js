@@ -284,10 +284,42 @@
         </dl><a class="btn block" style="margin-top:12px" href="${mapa}" target="_blank" rel="noopener">Abrir no mapa</a></div>
         <div class="sec">Suas atividades aqui</div>
         ${ts.map((t) => { const p = progresso(t); const nf = (B.fotos[t.id] || []).length; return `<a class="card end" href="#/t/${t.id}">
-          <div class="act"><span class="n"><b>${esc(t.atividade)}</b></span><span class="pill ${t.status}"><i></i>${ST[t.status]}</span></div>
+          <div class="act"><span class="n"><b>${esc(t.atividade)}</b>${t.extra ? ` <span class="xtag">Extra ×${String(t.quantidade).replace('.', ',')}</span>` : ''}</span><span class="pill ${t.status}"><i></i>${ST[t.status]}</span></div>
           <div class="meta">${p ? `Checklist ${p.feitos}/${p.total} · ` : ''}${nf} foto(s)${t.prevista_inicio ? ` · previsto ${fmtData(t.prevista_inicio)}` : ''}</div>
-          ${p ? `<div class="bar" style="margin-top:8px"><i style="width:${p.total ? Math.round(p.feitos / p.total * 100) : 0}%"></i></div>` : ''}</a>`; }).join('')}`,
+          ${p ? `<div class="bar" style="margin-top:8px"><i style="width:${p.total ? Math.round(p.feitos / p.total * 100) : 0}%"></i></div>` : ''}</a>`; }).join('')}
+        ${secExtra(e, ts)}`,
     });
+    ligarExtra(e, ts, () => telaEndereco(id));
+  }
+
+  // ---------- Atividade extra no endereço (ex.: escavação, poste): o técnico inclui no campo, com quantidade e motivo ----------
+  function secExtra(e, ts) {
+    const cat = ((B.extras || {})[e.contrato_id] || []).filter((x) => !ts.some((t) => t.atividade_id === x.id));
+    const naFila = fila.filter((a) => a.tipo === 'extra' && a.endereco_id === e.endereco_id);
+    if (!cat.length && !naFila.length) return '';
+    return `<div class="sec">Atividade extra</div>
+      <div class="card pad">
+        ${naFila.map((a) => `<div class="act" style="margin-bottom:8px"><span class="n"><b>${esc(a.nome)}</b> <span class="xtag">Extra ×${String(a.quantidade).replace('.', ',')}</span></span><span class="pill aguardando"><i></i>na fila</span></div>`).join('')}
+        ${cat.length ? `<p class="muted" style="font-size:.85rem;margin:0 0 8px">Precisou de algo que não estava previsto? Inclua aqui. Fica registrado com você como responsável.</p>
+        <label class="lb" for="xa">Atividade</label><select class="in" id="xa">${cat.filter((x) => !naFila.some((a) => a.atividade_id === x.id)).map((x) => `<option value="${x.id}">${esc(x.nome)}${x.item ? ' · fatura ' + esc(x.item) : ''}</option>`).join('')}</select>
+        <label class="lb" for="xq">Quantidade</label><input class="in" id="xq" inputmode="decimal" value="1" placeholder="Ex.: 1 poste, 12,5 metros">
+        <label class="lb" for="xm">Motivo</label><textarea class="in" id="xm" placeholder="Ex.: fachada sem ponto de fixação"></textarea>
+        <button class="btn primary block" style="margin-top:10px" id="xok">Incluir atividade extra</button>
+        <p class="muted" style="font-size:.8rem;margin:8px 0 0">Sem internet, fica guardada e é enviada na próxima sincronização. Depois aparece na lista acima, com checklist se tiver.</p>` : ''}
+      </div>`;
+  }
+  function ligarExtra(e, ts, redesenhar) {
+    const ok = $('#xok'); if (!ok) return;
+    ok.onclick = async () => {
+      const sel = $('#xa'); if (!sel || !sel.value) { toast('Escolha a atividade'); return; }
+      const q = Number($('#xq').value.replace(',', '.'));
+      if (!(q > 0)) { toast('Quantidade inválida'); return; }
+      const motivo = $('#xm').value.trim();
+      const nome = sel.options[sel.selectedIndex].text.split(' · ')[0];
+      await enfileirar({ tipo: 'extra', endereco_id: e.endereco_id, atividade_id: +sel.value, quantidade: q, motivo: motivo || null, nome });
+      toast(navigator.onLine ? 'Atividade extra incluída' : 'Atividade extra guardada para enviar');
+      redesenhar();
+    };
   }
 
   // Predecessora: a atividade só conclui depois que a predecessora estiver concluída no mesmo endereço
@@ -329,6 +361,7 @@
       body: `
         <div class="card pad" style="display:flex;flex-direction:column;gap:10px">
           <div class="act"><span class="n">Status</span><span class="pill ${t.status}"><i></i>${ST[t.status]}</span></div>
+          ${t.extra ? `<div class="note"><span class="xtag">Extra</span> Quantidade: <b>${String(t.quantidade).replace('.', ',')}</b>${t.motivo ? ` · ${esc(t.motivo)}` : ''}</div>` : ''}
           ${botoesStatus(t)}
           ${predPendente(t) ? `<div class="warnbox">🔒 Só pode ser concluída depois de <b>${esc(predPendente(t).nome)}</b>${predPendente(t).status ? ` (agora: ${ST[predPendente(t).status] || 'sem registro'})` : ''}.</div>` : ''}
           <div class="tempos"><div><span>Início</span><b>${t.realizada_inicio ? fmtHora(t.realizada_inicio) : '—'}</b></div><div><span>Conclusão</span><b>${t.realizada_fim ? fmtHora(t.realizada_fim) : '—'}</b></div></div>
@@ -483,8 +516,8 @@
     }
   }
 
-  function nomeTarefa(id) { const t = B && B.tarefas.find((x) => x.id === id); return t ? `${t.atividade} · ${t.endereco}` : `Atividade ${id}`; }
-  const ROT = { status: (a) => `Status → ${ST[a.status]}`, resposta: (a) => `Checklist: ${a.ok ? 'item marcado' : 'item desmarcado'}`, comentario: () => 'Comentário', foto: () => 'Foto', ativo: (a) => `Patrimônio ${a.patrimonio || a.numero_serie}` };
+  function nomeTarefa(id) { if (!id) return ''; const t = B && B.tarefas.find((x) => x.id === id); return t ? `${t.atividade} · ${t.endereco}` : `Atividade ${id}`; }
+  const ROT = { extra: (a) => `Atividade extra: ${a.nome || ''} (${String(a.quantidade || 1).replace('.', ',')})`, status: (a) => `Status → ${ST[a.status]}`, resposta: (a) => `Checklist: ${a.ok ? 'item marcado' : 'item desmarcado'}`, comentario: () => 'Comentário', foto: () => 'Foto', ativo: (a) => `Patrimônio ${a.patrimonio || a.numero_serie}` };
 
   function telaSync() {
     layout({

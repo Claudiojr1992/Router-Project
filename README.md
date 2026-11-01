@@ -615,6 +615,16 @@ As ações menos usadas da lista de endereços (alterar ou excluir os listados, 
 - **E-mail**: a tela Usuários mostra se o envio está configurado e manda um e-mail de teste. Sem SMTP, os pedidos de acesso aparecem para o administrador com **Aprovar sem confirmação**. Variáveis: `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`.
 - **Senha temporária**: senha definida pelo administrador (novo usuário ou troca) e senha fora da regra (8+ caracteres com letras e números) obrigam a criar uma senha nova no próximo acesso (`/senha.html`). Até lá, a API só libera `/api/auth/*`.
 
+## Atividades extras no endereço (escavação, poste…)
+
+- **Padrão ou extra**: em Atividades, cada atividade é *Padrão* (entra em todos os endereços) ou *Extra* (só entra no endereço quando alguém a inclui). A extra pode ter checklist e um **item faturado** (ex.: "Poste", R$ 850,00 por unidade). O item pode ser criado ali mesmo, com preço.
+- **Incluir no endereço**: na Execução, coluna *Extras do endereço* → "+ Extra". Escolha da lista do contrato ou crie outra na hora, com quantidade (aceita decimal, ex.: 12,5 m), motivo e responsável. Fica registrado quem incluiu, quando e por quê (histórico da atividade e auditoria).
+- **No app do técnico**: na tela do endereço, seção *Atividade extra* (funciona sem internet). A extra nasce com o técnico como responsável e depois aparece na lista, com o checklist.
+- **Faturamento**: quantidade × preço do item entra no valor do endereço quando a extra é **concluída**. Enquanto houver extra faturável em aberto, o endereço não entra na medição (aviso na tela do contrato). A medição grava a linha "Poste · extra: Instalação de poste".
+- **Remover**: quem incluiu remove enquanto nada foi feito nela; depois disso, só quem tem a permissão de excluir registros.
+- Nova ação de perfil **Incluir atividade extra num endereço** (liberada por padrão para os perfis internos). Migração `018_atividades_extras.sql`.
+- Extras não entram no cálculo de dias do Painel de rotas.
+
 ## Vercel + Supabase
 
 O mesmo código roda no Vercel como uma função só (`api/index.js`), com o banco no Supabase.

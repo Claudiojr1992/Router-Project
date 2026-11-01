@@ -123,3 +123,5 @@ textarea.in{min-height:80px;resize:vertical}
 .patl{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:.9rem}
 .patl li{padding:6px 0;border-bottom:1px solid var(--line)}
 .patl span,.patl small{color:var(--muted)}
+
+.xtag{display:inline-block;font-size:.66rem;font-weight:700;padding:1px 6px;border-radius:999px;background:color-mix(in srgb,var(--accent,#0E6E63) 14%,transparent);color:var(--accent,#0E6E63);text-transform:uppercase;vertical-align:middle}

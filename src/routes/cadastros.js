@@ -5,6 +5,7 @@ const { HttpError } = require('../http');
 const { requer, GESTAO, ESCRITORIO, INTERNOS } = require('../auth');
 const { validarItens, garantirItem, salvarItensEndereco } = require('../itens');
 const { VALOR } = require('./faturamento');
+const { itemNovo } = require('../extras');
 const { aplicarEtapa, garantirEtapa, parseData, validarData, clienteDoContrato } = require('../etapas');
 const { aplicarPlano, parseNaRota, ajustarEquipes, parseEquipe, parseDia, MAX_EQUIPES, carregarRegras, validarRegras, recalcularPrevisao } = require('../plano');
 
@@ -109,7 +110,16 @@ function atividadeBody(b) {
     v.int(b.ordem ?? 0, 'A ordem', { min: 0, max: 1000 }),
     v.oneOf(b.tempo_impacto || (b.conta_rota === false ? 'nenhum' : 'soma'), 'Impacto no tempo', ['soma', 'paralelo', 'nenhum']),
     b.predecessora_id ? v.id(b.predecessora_id, 'Predecessora') : null,
+    b.extra === true,
+    b.extra === true && b.item_id ? v.id(b.item_id, 'Item faturado') : null,
   ];
+}
+
+// O item faturado da atividade extra precisa ser do mesmo contrato
+async function conferirItem(c, contratoId, itemId) {
+  if (!itemId) return;
+  const ok = (await c.query(`SELECT 1 FROM contrato_itens WHERE id = $1 AND contrato_id = $2`, [itemId, contratoId])).rows.length;
+  if (!ok) throw new HttpError(400, 'O item faturado precisa ser um item deste contrato');
 }
 
 // A predecessora precisa ser do mesmo contrato e não pode fechar um ciclo (A depende de B que depende de A)
@@ -130,8 +140,8 @@ async function conferirPredecessora(c, contratoId, atividadeId, predId) {
 async function copiarPadrao(c, contrato) {
   const origem = (await c.query(`SELECT contrato_id FROM atividades WHERE ativo AND contrato_id <> $1 GROUP BY contrato_id ORDER BY count(*) DESC, contrato_id LIMIT 1`, [contrato])).rows[0];
   if (origem) {
-    await c.query(`INSERT INTO atividades (contrato_id, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, min_por_camera, faixas, conta_rota, checklist_id, evidencia, ordem, tempo_impacto)
-                   SELECT $1, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, min_por_camera, faixas, conta_rota, checklist_id, evidencia, ordem, tempo_impacto
+    await c.query(`INSERT INTO atividades (contrato_id, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, min_por_camera, faixas, conta_rota, checklist_id, evidencia, ordem, tempo_impacto, extra)
+                   SELECT $1, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, min_por_camera, faixas, conta_rota, checklist_id, evidencia, ordem, tempo_impacto, extra
                      FROM atividades WHERE contrato_id = $2 AND ativo ORDER BY ordem`, [contrato, origem.contrato_id]);
     await c.query(`UPDATE atividades n SET predecessora_id = np.id
                      FROM atividades o JOIN atividades op ON op.id = o.predecessora_id
@@ -150,7 +160,7 @@ async function copiarPadrao(c, contrato) {
     }
   }
   await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT e.id, a.id FROM enderecos e JOIN atividades a ON a.contrato_id = e.contrato_id
-                 WHERE e.contrato_id = $1 AND a.ativo ON CONFLICT DO NOTHING`, [contrato]);
+                 WHERE e.contrato_id = $1 AND a.ativo AND NOT a.extra ON CONFLICT DO NOTHING`, [contrato]);
 }
 
 // Preço, se é faturável e se controla patrimônio, por nome do item (vindos da tela do contrato)
@@ -351,7 +361,7 @@ module.exports = (app) => {
     const cliE = await clienteDoContrato(c, contrato);
     await ajustarEquipes(c, cliE);
     await recalcularPrevisao(c, cliE, [e.id]);
-    await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT $1, id FROM atividades WHERE contrato_id = $2 AND ativo
+    await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT $1, id FROM atividades WHERE contrato_id = $2 AND ativo AND NOT extra
                    ON CONFLICT DO NOTHING`, [e.id, contrato]);
     // aplica as regras de distribuição do projeto ao endereço novo
     await c.query(`UPDATE tarefas t SET responsavel_id = r.pessoa_id FROM regras_distribuicao r
@@ -402,7 +412,7 @@ module.exports = (app) => {
         await aplicarEtapaLinha(nid, n);
         ids.push(nid);
       }
-      await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT e.id, a.id FROM enderecos e JOIN atividades a ON a.contrato_id = e.contrato_id AND a.ativo
+      await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT e.id, a.id FROM enderecos e JOIN atividades a ON a.contrato_id = e.contrato_id AND a.ativo AND NOT a.extra
                      WHERE e.id = ANY($1) ON CONFLICT DO NOTHING`, [ids]);
       await c.query(`UPDATE enderecos SET geo_fonte = 'manual' WHERE id = ANY($1) AND lat IS NOT NULL AND lon IS NOT NULL`, [ids]);
       await c.query(`UPDATE tarefas t SET responsavel_id = r.pessoa_id FROM regras_distribuicao r
@@ -523,6 +533,7 @@ module.exports = (app) => {
   // ---------- Atividades ----------
   app.get('/api/contratos/:id/atividades', leitura, async (req) => db.many(
     `SELECT a.*, ck.nome AS checklist_nome, (SELECT p.nome FROM atividades p WHERE p.id = a.predecessora_id) AS predecessora_nome,
+            (SELECT ci.nome FROM contrato_itens ci WHERE ci.id = a.item_id) AS item_nome, (SELECT ci.valor_unitario FROM contrato_itens ci WHERE ci.id = a.item_id)::float AS item_valor,
             (SELECT count(*)::int FROM tarefas t WHERE t.atividade_id = a.id) AS tarefas,
             (SELECT count(*)::int FROM tarefas t WHERE t.atividade_id = a.id AND t.status = 'concluida') AS concluidas
        FROM atividades a LEFT JOIN checklists ck ON ck.id = a.checklist_id
@@ -530,12 +541,16 @@ module.exports = (app) => {
 
   app.post('/api/contratos/:id/atividades', gestao, async (req) => db.tx(async (c) => {
     const contrato = v.id(req.params.id);
+    const corpo = atividadeBody(req.body);
+    if (corpo[15] && !corpo[16] && req.body.item_novo) corpo[16] = await itemNovo(c, contrato, req.body.item_novo);
+    await conferirPredecessora(c, contrato, null, corpo[14]);
+    await conferirItem(c, contrato, corpo[16]);
     const a = (await c.query(
       `INSERT INTO atividades (contrato_id, nome, curto, etapa, funcao, tempo_modo, tempo_qtd, tempo_unidade, min_por_camera, faixas,
-                               conta_rota, checklist_id, evidencia, ordem, tempo_impacto, predecessora_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16) RETURNING *`, await (async () => {
-        const corpo = atividadeBody(req.body); await conferirPredecessora(c, contrato, null, corpo[14]); return [contrato, ...corpo]; })())).rows[0];
-    await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT id, $1 FROM enderecos WHERE contrato_id = $2
+                               conta_rota, checklist_id, evidencia, ordem, tempo_impacto, predecessora_id, extra, item_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`, [contrato, ...corpo])).rows[0];
+    // atividade padrão entra em todos os endereços; a extra só quando alguém a inclui num endereço
+    if (!a.extra) await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT id, $1 FROM enderecos WHERE contrato_id = $2
                    ON CONFLICT DO NOTHING`, [a.id, contrato]);
     return a;
   }));
@@ -551,21 +566,35 @@ module.exports = (app) => {
 
   // Preparação do projeto (guia na tela do cliente): o que já está pronto em cada contrato
   app.get('/api/contratos/:id/preparacao', leitura, async (req) => db.one(
-    `SELECT (SELECT count(*)::int FROM atividades a WHERE a.contrato_id = $1 AND a.ativo) AS atividades,
+    `SELECT (SELECT count(*)::int FROM atividades a WHERE a.contrato_id = $1 AND a.ativo AND NOT a.extra) AS atividades,
             count(t.id)::int AS tarefas,
             count(t.id) FILTER (WHERE t.responsavel_id IS NULL AND t.status <> 'concluida')::int AS sem_responsavel
        FROM enderecos e LEFT JOIN tarefas t ON t.endereco_id = e.id WHERE e.contrato_id = $1`, [v.id(req.params.id)]));
 
   app.put('/api/atividades/:id', gestao, async (req) => db.tx(async (c) => {
     const id = v.id(req.params.id);
-    const atual = (await c.query(`SELECT contrato_id FROM atividades WHERE id = $1`, [id])).rows[0];
+    const atual = (await c.query(`SELECT contrato_id, extra FROM atividades WHERE id = $1`, [id])).rows[0];
     if (!atual) throw new HttpError(404, 'Atividade não encontrada');
     const corpo = atividadeBody(req.body);
+    if (corpo[15] && !corpo[16] && req.body.item_novo) corpo[16] = await itemNovo(c, atual.contrato_id, req.body.item_novo);
     await conferirPredecessora(c, atual.contrato_id, id, corpo[14]);
-    return (await c.query(
+    await conferirItem(c, atual.contrato_id, corpo[16]);
+    const a = (await c.query(
       `UPDATE atividades SET nome=$1, curto=$2, etapa=$3, funcao=$4, tempo_modo=$5, tempo_qtd=$6, tempo_unidade=$7, min_por_camera=$8,
-              faixas=$9::jsonb, conta_rota=$10, checklist_id=$11, evidencia=$12, ordem=$13, tempo_impacto=$14, predecessora_id=$15 WHERE id = $16 RETURNING *`,
+              faixas=$9::jsonb, conta_rota=$10, checklist_id=$11, evidencia=$12, ordem=$13, tempo_impacto=$14, predecessora_id=$15,
+              extra=$16, item_id=$17 WHERE id = $18 RETURNING *`,
       [...corpo, id])).rows[0];
+    if (atual.extra && !a.extra) {
+      // virou padrão: entra em todos os endereços (as que já existiam como extra continuam com quantidade e motivo)
+      await c.query(`INSERT INTO tarefas (endereco_id, atividade_id) SELECT id, $1 FROM enderecos WHERE contrato_id = $2 ON CONFLICT DO NOTHING`, [id, atual.contrato_id]);
+    } else if (!atual.extra && a.extra) {
+      // virou extra: sai dos endereços onde ainda não foi mexida (sem responsável, sem andamento, checklist ou foto)
+      await c.query(`DELETE FROM tarefas t WHERE t.atividade_id = $1 AND NOT t.extra AND t.status = 'a_fazer' AND t.responsavel_id IS NULL
+                       AND NOT EXISTS (SELECT 1 FROM checklist_respostas r WHERE r.tarefa_id = t.id)
+                       AND NOT EXISTS (SELECT 1 FROM evidencias ev WHERE ev.tarefa_id = t.id)`, [id]);
+      await c.query(`UPDATE tarefas SET extra = true, solicitado_em = COALESCE(solicitado_em, now()) WHERE atividade_id = $1`, [id]);
+    }
+    return a;
   }));
 
   app.delete('/api/atividades/:id', gestao, async (req) => {

@@ -25,6 +25,7 @@ const ACOES = [
   { id: 'reabrir', nome: 'Reabrir atividade concluída' },
   { id: 'excluir', nome: 'Excluir endereços, arquivos e registros' },
   { id: 'delegar', nome: 'Trocar o responsável de uma atividade' },
+  { id: 'incluir_extra', nome: 'Incluir atividade extra num endereço (ex.: escavação, poste)' },
   { id: 'distribuir', nome: 'Distribuir atividades em lote e criar regras' },
   { id: 'forcar_monitoramento', nome: 'Subir ao Zabbix sem concluir as atividades' },
 ];

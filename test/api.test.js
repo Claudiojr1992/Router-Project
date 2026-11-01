@@ -99,6 +99,56 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     assert.equal(imp.novos, 1); assert.equal(imp.erros.length, 1);
   });
 
+  await t.test('atividade extra no endereço: registro, checklist, faturamento ao concluir e app', async () => {
+    const c = await admin.post(`/api/clientes/${cli.id}/contratos`, { numero: 'X-' + sufixo, tipo: 'aditivo', atividades_padrao: false,
+      itens: [{ nome: 'Câmera', faturavel: true, valor_unitario: '100' }] });
+    const xct = c.json.id;
+    const pad = await admin.post(`/api/contratos/${xct}/atividades`, { nome: 'Instalação', tempo_modo: 'fixo', tempo_qtd: 1, tempo_unidade: 'dia' });
+    const ck = (await admin.post('/api/checklists', { nome: 'Poste ' + sufixo, itens: [{ texto: 'Poste aprumado', tipo_resposta: 'check' }] })).json;
+    // extra no catálogo, com item novo e preço: não entra sozinha nos endereços
+    const ex = await admin.post(`/api/contratos/${xct}/atividades`, { nome: 'Instalação de poste', extra: true, checklist_id: ck.id, tempo_modo: 'fixo', tempo_qtd: 1, tempo_unidade: 'dia',
+      item_novo: { nome: 'Poste', unidade: 'un', valor_unitario: '850,50' } });
+    assert.equal(ex.status, 200, JSON.stringify(ex.json));
+    assert.ok(ex.json.extra && ex.json.item_id);
+    const e = (await admin.post(`/api/contratos/${xct}/enderecos`, { nome: 'Agência Extra', municipio: 'Fortaleza', uf: 'CE', cameras: 1, itens: [{ nome: 'Câmera', quantidade: 1 }] })).json;
+    let p = (await admin.get('/api/projetos/' + xct)).json;
+    assert.deepEqual(p.atividades.map((a) => a.id), [pad.json.id], 'extra não vira coluna nem tarefa automática');
+    assert.equal(p.extras.length, 1);
+    assert.equal(p.enderecos[0].tarefas.length, 1);
+    // inclui no endereço com quantidade e motivo
+    const t1 = await admin.post('/api/tarefas/extra', { endereco_id: e.id, atividade_id: ex.json.id, quantidade: 2, motivo: 'Fachada sem fixação' });
+    assert.equal(t1.status, 200, JSON.stringify(t1.json));
+    assert.equal((await admin.post('/api/tarefas/extra', { endereco_id: e.id, atividade_id: ex.json.id })).status, 400, 'não duplica no endereço');
+    assert.equal((await admin.post('/api/tarefas/extra', { endereco_id: e.id, atividade_id: pad.json.id })).status, 400, 'padrão não entra como extra');
+    // tipo novo criado na hora, sem item faturável
+    const t2 = await admin.post('/api/tarefas/extra', { endereco_id: e.id, nova: { nome: 'Escavação' }, quantidade: '12,5' });
+    assert.equal(t2.status, 200, JSON.stringify(t2.json));
+    assert.equal(Number(t2.json.quantidade), 12.5);
+    p = (await admin.get('/api/projetos/' + xct)).json;
+    const ext = p.enderecos[0].tarefas.find((x) => x.id === t1.json.id);
+    assert.equal(ext.extra, true); assert.equal(ext.item_nome, 'Poste'); assert.equal(ext.ck_total, 1); assert.equal(ext.motivo, 'Fachada sem fixação');
+    assert.ok((await admin.get(`/api/tarefas/${t1.json.id}/eventos`)).json.some((x) => x.tipo === 'extra'), 'inclusão no histórico');
+    // endereço concluído com extra faturável aberta: fica fora da medição até concluir a extra
+    await admin.post(`/api/enderecos/${e.id}/conclusao`, { data: new Date().toISOString().slice(0, 10) });
+    let f = (await admin.get('/api/faturamento/contratos/' + xct)).json;
+    assert.equal(f.aptos.length, 0); assert.equal(f.pendentes_extra.length, 1);
+    assert.equal((await admin.patch('/api/tarefas/' + t1.json.id, { quantidade: 3 })).status, 200);
+    assert.equal((await admin.patch('/api/tarefas/' + t1.json.id, { status: 'concluida' })).status, 200);
+    f = (await admin.get('/api/faturamento/contratos/' + xct)).json;
+    assert.equal(f.aptos.length, 1, 'escavação sem item não segura a medição');
+    assert.equal(f.aptos[0].valor, 100 + 3 * 850.5);
+    assert.ok(f.aptos[0].detalhe.some((d) => d.extra && /Poste · extra: Instalação de poste/.test(d.item)));
+    const m = (await admin.post(`/api/faturamento/contratos/${xct}/medicoes`, { competencia: new Date().toISOString().slice(0, 7), endereco_ids: [e.id] })).json;
+    const md = (await admin.get('/api/medicoes/' + m.id)).json;
+    assert.equal(md.valor_total, 100 + 3 * 850.5);
+    // app: técnico inclui a extra pela fila offline e ela fica com ele
+    const t3 = (await admin.post('/api/mobile/acoes', { acoes: [{ id: require('crypto').randomUUID(), tipo: 'extra', endereco_id: e.id, atividade_id: t2.json.atividade_id }] })).json;
+    assert.equal(t3.resultados[0].ok, false, 'já existe no endereço');
+    // remover extra incluída por engano
+    assert.equal((await admin.del('/api/tarefas/' + t2.json.id)).status, 200);
+    assert.equal((await admin.del('/api/tarefas/' + p.enderecos[0].tarefas.find((x) => !x.extra).id)).status, 400, 'padrão não se remove');
+  });
+
   await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
     const r = await admin.put('/api/enderecos/' + end.id, { nome: 'Agência Teste', logradouro: 'Rua Nova, 10', municipio: 'Fortaleza', uf: 'CE', cameras: 6 });
     assert.equal(r.status, 200);

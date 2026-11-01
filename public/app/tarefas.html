@@ -61,7 +61,7 @@ function renderComigo(topo) {
         <button role="tab" aria-selected="${aba === 'feitas'}" data-a="feitas">Concluídas (${itens.length - ab.length})</button>
       </div>
       ${vis.length ? `<div>${vis.map((t) => `<div class="row click" data-abre="${t.id}" style="padding:14px 16px;border-bottom:1px solid var(--line);align-items:flex-start;cursor:pointer">
-          <div style="flex:1;min-width:200px"><b>${RP.esc(t.atividade)}</b><div class="muted" style="font-size:.9rem">${RP.esc(t.endereco)} · ${RP.esc(t.municipio)}/${t.uf} · ${t.cameras} câmeras</div>
+          <div style="flex:1;min-width:200px"><b>${RP.esc(t.atividade)}</b>${t.extra ? ` <span class="xtag">Extra ×${String(t.quantidade).replace('.', ',')}</span>` : ''}<div class="muted" style="font-size:.9rem">${RP.esc(t.endereco)} · ${RP.esc(t.municipio)}/${t.uf} · ${t.cameras} câmeras</div>
             <div class="muted" style="font-size:.85rem">${RP.esc(t.cliente)}${t.prevista_inicio ? ' · previsto ' + RP.fmtData(t.prevista_inicio) : ''}</div></div>
           <span class="pill ${t.status}"><i></i>${ST[t.status]}</span>
           ${PROX[t.status] ? `<button class="btn sm primary" data-id="${t.id}" data-s="${PROX[t.status][0]}">${PROX[t.status][1]}</button>` : ''}
@@ -90,7 +90,7 @@ function renderDelegadas(topo) {
     ${vis.length ? `<div class="kanban">${Object.entries(ST).map(([k, v]) => {
       const col = vis.filter((t) => t.status === k);
       return `<section class="kcol" aria-label="${v}"><h3><span class="pill ${k}"><i></i>${v}</span><span class="muted" style="font-size:.9rem">${col.length}</span></h3>
-        ${col.slice(0, 80).map((t) => `<button class="kcard" data-id="${t.id}"><b>${RP.esc(t.atividade)}</b>
+        ${col.slice(0, 80).map((t) => `<button class="kcard" data-id="${t.id}"><b>${RP.esc(t.atividade)}</b>${t.extra ? ' <span class="xtag">Extra</span>' : ''}
           <span class="meta">${RP.esc(t.endereco)} · ${RP.esc(t.municipio)}/${t.uf}</span>
           <span class="meta">${RP.esc(t.cliente)} · ${RP.esc(t.contrato)}</span>
           <span class="row" style="gap:6px"><span class="avatar" style="width:24px;height:24px;font-size:.7rem">${RP.esc(RP.iniciais(t.responsavel))}</span><span class="meta">${RP.esc(t.responsavel)}${t.prevista_fim ? ' · até ' + RP.fmtData(t.prevista_fim) : ''}</span></span></button>`).join('')}
