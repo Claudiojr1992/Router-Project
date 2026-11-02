@@ -285,7 +285,7 @@ module.exports = (app) => {
   // Página do painel com os dados do cliente
   app.get('/app/rota/:cliente', async (req, res) => {
     const u = await loadUser(req);
-    if (!u) { res.writeHead(302, { Location: '/?volta=' + encodeURIComponent('/app/rota.html') }); res.end(); return; }
+    if (!u) { res.writeHead(302, { Location: '/login.html?volta=' + encodeURIComponent('/app/rota.html') }); res.end(); return; }
     if (!require('../auth').pode(u, 'rota', 'ver')) throw new HttpError(403, 'Seu perfil não tem acesso a esta tela');
     const id = v.id(req.params.cliente, 'Cliente');
     const { dados } = await carregar(id);

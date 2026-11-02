@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contatos do site · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+<script src="/js/planilha.js"></script>
+</head>
+<body>
+<script>
+// Contatos do site: pedidos de demonstração que chegam pela página inicial e o acompanhamento comercial
+const ST = { novo: ['Novo', 'var(--info)'], em_contato: ['Em contato', 'var(--warn)'], proposta: ['Proposta enviada', '#B0399A'], fechado: ['Fechado', 'var(--ok)'], descartado: ['Descartado', 'var(--muted)'] };
+let S, lista = [], filtro = '', q = '';
+
+(async () => {
+  S = await Shell.init({ key: 'contatos', title: 'Contatos do site', sub: 'Pedidos de demonstração vindos da página inicial e o andamento de cada um' });
+  S.actions.innerHTML = '<a class="btn sm" href="/" target="_blank" rel="noopener">Ver o site</a><button class="btn sm" id="exp">Exportar (.xlsx)</button>';
+  RP.$('#exp').onclick = () => Planilha.baixar(Planilha.xlsx([{ nome: 'Contatos', linhas: [['Data', 'Nome', 'Empresa', 'E-mail', 'Telefone', 'Endereços por ano', 'Interesse', 'Mensagem', 'Situação', 'Anotação'],
+    ...lista.map((c) => [RP.fmtDataHora(c.criado_em), c.nome, c.empresa || '', c.email, c.telefone || '', c.enderecos || '', c.interesse || '', c.mensagem || '', ST[c.status][0], c.nota || ''])] }]), 'Contatos_do_site.xlsx');
+  await carregar();
+})();
+
+async function carregar() { lista = await RP.api('/contatos'); render(); }
+
+function render() {
+  const n = (s) => lista.filter((c) => c.status === s).length;
+  const lq = q.toLowerCase();
+  const vis = lista.filter((c) => (!filtro || c.status === filtro) && (!lq || [c.nome, c.empresa, c.email, c.telefone].join(' ').toLowerCase().includes(lq)));
+  S.content.innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><span>Novos, sem retorno</span><b style="color:${n('novo') ? 'var(--info)' : 'inherit'}">${n('novo')}</b></div>
+      <div class="kpi"><span>Em negociação</span><b>${n('em_contato') + n('proposta')}</b></div>
+      <div class="kpi"><span>Fechados</span><b style="color:var(--ok)">${n('fechado')}</b></div>
+      <div class="kpi"><span>Últimos 30 dias</span><b>${lista.filter((c) => Date.now() - new Date(c.criado_em) < 30 * 864e5).length}</b></div>
+    </div>
+    <div class="card">
+      <header class="toolbar">
+        <input class="input" id="q" placeholder="Buscar nome, empresa ou e-mail" value="${RP.esc(q)}" aria-label="Buscar" style="max-width:320px">
+        <select class="input" id="st" style="max-width:220px" aria-label="Situação"><option value="">Todas as situações</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}" ${k === filtro ? 'selected' : ''}>${l} (${n(k)})</option>`).join('')}</select>
+        <span class="spacer"></span><span class="muted">${vis.length} contato(s)</span>
+      </header>
+      ${vis.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Recebido</th><th>Contato</th><th>Empresa</th><th>Endereços por ano</th><th>Interesse</th><th>Situação</th></tr></thead><tbody>
+        ${vis.map((c) => `<tr class="click" data-id="${c.id}"><td style="white-space:nowrap">${RP.fmtDataHora(c.criado_em)}</td>
+          <td><b>${RP.esc(c.nome)}</b><div class="muted" style="font-size:.84rem">${RP.esc(c.email)}${c.telefone ? ' · ' + RP.esc(c.telefone) : ''}</div></td>
+          <td>${RP.esc(c.empresa || '—')}</td><td>${RP.esc(c.enderecos || '—')}</td><td>${RP.esc(c.interesse || '—')}</td>
+          <td><span class="pill" style="color:${ST[c.status][1]}"><i></i>${ST[c.status][0]}</span></td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty">${lista.length ? 'Nenhum contato com esses filtros.' : 'Nenhum pedido de demonstração ainda. Eles chegam pelo formulário da página inicial do site.'}</div>`}
+    </div>`;
+  const qi = RP.$('#q'); qi.oninput = () => { q = qi.value; clearTimeout(qi._t); qi._t = setTimeout(() => { render(); RP.$('#q').focus(); RP.$('#q').setSelectionRange(99, 99); }, 250); };
+  RP.$('#st').onchange = (e) => { filtro = e.target.value; render(); };
+  RP.$$('tr.click', S.content).forEach((tr) => (tr.onclick = () => abrir(lista.find((c) => c.id === +tr.dataset.id))));
+}
+
+function abrir(c) {
+  const wa = c.telefone ? String(c.telefone).replace(/\D/g, '') : '';
+  RP.drawer(c.nome, `
+    <p class="muted" style="margin-top:0">Recebido em ${RP.fmtDataHora(c.criado_em)}${c.origem ? ' pelo botão “' + RP.esc(c.origem) + '”' : ''}</p>
+    <dl class="dl">
+      <dt>Empresa</dt><dd>${RP.esc(c.empresa || '—')}</dd>
+      <dt>E-mail</dt><dd><a href="mailto:${RP.esc(c.email)}?subject=${encodeURIComponent('Demonstração do RoutProject')}">${RP.esc(c.email)}</a></dd>
+      <dt>Telefone</dt><dd>${c.telefone ? `${RP.esc(c.telefone)}${wa.length >= 10 ? ` · <a href="https://wa.me/${wa.length <= 11 ? '55' + wa : wa}" target="_blank" rel="noopener">WhatsApp</a>` : ''}` : '—'}</dd>
+      <dt>Endereços por ano</dt><dd>${RP.esc(c.enderecos || '—')}</dd>
+      <dt>Interesse</dt><dd>${RP.esc(c.interesse || '—')}</dd>
+      <dt>Mensagem</dt><dd style="white-space:pre-wrap">${RP.esc(c.mensagem || '—')}</dd>
+    </dl>
+    <div class="field"><label for="c-st">Situação</label><select class="input" id="c-st">${Object.entries(ST).map(([k, [l]]) => `<option value="${k}" ${k === c.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label for="c-n">Anotações</label><textarea class="input" id="c-n" rows="5" placeholder="Ex.: demonstração marcada para 12/11 às 10h">${RP.esc(c.nota || '')}</textarea></div>`, {
+    onSave: async (el) => {
+      const n = await RP.api('/contatos/' + c.id, { method: 'PATCH', body: { status: RP.$('#c-st', el).value, nota: RP.$('#c-n', el).value } });
+      Object.assign(c, n); render(); RP.toast('Contato atualizado');
+    },
+  });
+}
+</script>
+<style>.dl{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;margin:0 0 16px}.dl dt{color:var(--muted)}.dl dd{margin:0;color:var(--ink)}</style>
+</body>
+</html>

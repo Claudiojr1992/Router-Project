@@ -14,7 +14,7 @@ test('telas abrem sem erro no navegador', { skip: pular, timeout: 180000 }, asyn
   const p = await (await b.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
   const erros = [];
   p.on('pageerror', (e) => erros.push(`${p.url()}: ${e.message}`));
-  await p.goto(URL_BASE + '/');
+  await p.goto(URL_BASE + '/login.html');
   await p.fill('#email', process.env.E2E_EMAIL);
   await p.fill('#senha', process.env.E2E_SENHA);
   await p.click('#go');

@@ -17,6 +17,7 @@ const MODULOS = [
   { id: 'checklists', nome: 'Checklists', grupo: 'Cadastros', desc: 'Checklists e modelo do relatório' },
   { id: 'equipe', nome: 'Técnicos e times', grupo: 'Cadastros', desc: 'Pessoas e times que recebem atividades' },
   { id: 'conexoes', nome: 'Conexões', grupo: 'Cadastros', desc: 'NetBox e Zabbix' },
+  { id: 'contatos', nome: 'Contatos do site', grupo: 'Administração', desc: 'Pedidos de demonstração vindos do site e acompanhamento comercial' },
   { id: 'usuarios', nome: 'Usuários e acessos', grupo: 'Administração', desc: 'Aprovar, criar e editar usuários' },
   { id: 'permissoes', nome: 'Permissões', grupo: 'Administração', desc: 'Perfis e o que cada um pode fazer' },
   { id: 'auditoria', nome: 'Auditoria', grupo: 'Administração', desc: 'Histórico de tudo o que mudou no sistema', soVer: true },
@@ -68,6 +69,8 @@ const ROTAS = [
   ['*', P('/api/perfis(/.*)?'), { GET: ['permissoes:ver', 'usuarios:ver'], default: 'permissoes:editar' }],
   ['*', P('/api/auditoria(/.*)?'), 'auditoria:ver'],
   ['*', P('/api/usuarios(/.*)?'), 'usuarios'],
+  ['POST', P('/api/site/contato'), null],
+  ['*', P('/api/contatos(/.*)?'), 'contatos'],
   // patrimônio (antes das regras gerais de endereços)
   ['GET', P('/api/enderecos/[^/]+/ativos'), { any: ['patrimonio:ver', 'clientes:ver'] }],
   ['DELETE', P('/api/ativos/[^/]+'), ['patrimonio:editar', { acao: 'excluir' }]],

@@ -149,6 +149,18 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     assert.equal((await admin.del('/api/tarefas/' + p.enderecos[0].tarefas.find((x) => !x.extra).id)).status, 400, 'padrão não se remove');
   });
 
+  await t.test('site: pedido de demonstração sem login chega em Contatos do site', async () => {
+    const anon = cliente();
+    const r = await anon.post('/api/site/contato', { nome: 'Lead ' + sufixo, email: `lead_${sufixo}@empresa.com.br`, empresa: 'Integradora', enderecos: '51 a 200', origem: 'Hero' });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal((await anon.post('/api/site/contato', { nome: 'X', email: 'invalido' })).status, 400);
+    assert.equal((await anon.get('/api/contatos')).status, 401);
+    const lista = (await admin.get('/api/contatos')).json;
+    const c = lista.find((x) => x.nome === 'Lead ' + sufixo);
+    assert.ok(c && c.status === 'novo');
+    assert.equal((await admin.patch('/api/contatos/' + c.id, { status: 'em_contato', nota: 'Ligar terça' })).json.status, 'em_contato');
+  });
+
   await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
     const r = await admin.put('/api/enderecos/' + end.id, { nome: 'Agência Teste', logradouro: 'Rua Nova, 10', municipio: 'Fortaleza', uf: 'CE', cameras: 6 });
     assert.equal(r.status, 200);

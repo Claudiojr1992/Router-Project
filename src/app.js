@@ -26,6 +26,7 @@ require('./routes/patrimonio')(app);
 require('./routes/conexoes')(app);
 require('./routes/admin')(app);
 require('./routes/tiles')(app);
+require('./routes/site')(app);
 
 // Rotina agendada (Vercel Cron ou chamada manual): localiza endereços sem coordenadas
 app.get('/api/cron/geocodificar', async (req) => {

@@ -1,58 +1,271 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Entrar · RoutProject</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoutProject · Gestão de implantação em campo</title>
+<meta name="description" content="Planeje rotas e etapas, distribua atividades entre equipes, acompanhe o técnico pelo celular (mesmo sem internet) e fature por item quando cada endereço é concluído.">
+<meta property="og:title" content="RoutProject · Gestão de implantação em campo">
+<meta property="og:description" content="Do cadastro do endereço à nota fiscal: rotas, equipes, app do técnico, relatório com assinatura, patrimônio e faturamento por item.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="/site/img/rota_mapa.webp">
+<meta name="theme-color" content="#0B3B36">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
-<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="/site/site.css">
+<script>if (/[?&]volta=/.test(location.search)) location.replace('/login.html' + location.search);</script>
 </head>
 <body>
-<div class="auth">
-  <aside class="auth-brand" id="brand"></aside>
-  <main class="auth-main">
-    <form class="auth-card" id="f" novalidate>
-      <span class="mobile-logo"></span>
-      <h1>Entrar</h1>
-      <p class="lead">Acesse com o e-mail e a senha cadastrados.</p>
-      <div class="alert" id="msg" hidden></div>
-      <div class="field"><label for="email">E-mail</label><input class="input" id="email" type="email" autocomplete="email" required></div>
-      <div class="field"><label for="senha">Senha</label><div class="pw"><input class="input" id="senha" type="password" autocomplete="current-password" required></div></div>
-      <div class="row" style="margin-bottom:16px">
-        <label class="check" style="margin:0"><input type="checkbox" id="lembrar" checked> Manter conectado</label>
-        <span class="spacer"></span><a href="/recuperar.html">Esqueci minha senha</a>
+<a class="pular" href="#conteudo">Pular para o conteúdo</a>
+
+<header class="topo" id="topo">
+  <div class="faixa">
+    <a class="marca" href="/" aria-label="RoutProject, início">
+      <span class="selo"><svg viewBox="0 0 24 24" fill="none" stroke="#0B3B36" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="18" r="2.2"/><circle cx="19" cy="6" r="2.2"/><path d="M7 17c5 0 3-10 10-10"/></svg></span>
+      <span>Rout<b>Project</b></span>
+    </a>
+    <nav class="menu" id="menu" aria-label="Seções do site">
+      <a href="#caminho">Como funciona</a>
+      <a href="#rotas">Rotas</a>
+      <a href="#campo">App de campo</a>
+      <a href="#faturamento">Faturamento</a>
+      <a href="#recursos">Recursos</a>
+      <a href="#perguntas">Perguntas</a>
+    </nav>
+    <div class="acoes">
+      <a class="btn entrar" id="entrar" href="/login.html">Entrar</a>
+      <a class="btn ambar" href="#contato" data-origem="Topo">Agendar demonstração</a>
+      <button class="hamb" id="hamb" type="button" aria-label="Abrir menu" aria-expanded="false" aria-controls="menu"><span></span><span></span></button>
+    </div>
+  </div>
+</header>
+
+<main id="conteudo">
+  <!-- Hero: o plano de rotas desenhando no mapa -->
+  <section class="hero">
+    <div class="faixa hero-grade">
+      <div class="hero-texto">
+        <h1>Cada endereço, da planilha à nota fiscal.</h1>
+        <p class="lide">O RoutProject organiza a implantação em campo de ponta a ponta: planeja rotas e etapas, distribui o trabalho entre as equipes, acompanha o técnico pelo celular e gera o faturamento quando o endereço é concluído.</p>
+        <div class="hero-cta">
+          <a class="btn ambar grande" href="#contato" data-origem="Hero">Agendar demonstração</a>
+          <a class="btn contorno grande" href="#caminho">Ver como funciona</a>
+        </div>
+        <ul class="hero-fatos">
+          <li><b>Funciona sem internet</b> no app do técnico</li>
+          <li><b>Importa a sua planilha</b> de endereços</li>
+          <li><b>Fatura por item</b> do contrato</li>
+        </ul>
       </div>
-      <button class="btn primary block" id="go">Entrar</button>
-      <p class="alt">Ainda não tem acesso? <a href="/cadastro.html">Criar cadastro</a></p>
-    </form>
-  </main>
-</div>
-<script src="/js/api.js"></script>
-<script src="/js/auth.js"></script>
-<script>
-const msg = RP.$('#msg');
-const volta = new URLSearchParams(location.search).get('volta');
-const destino0 = (u) => (volta && volta.startsWith('/app/')) ? volta : (u.perfil === 'tecnico' ? '/m/' : u.perfil === 'admin' || ['rota', 'projetos', 'clientes'].some((m) => u.permissoes && u.permissoes[m] && u.permissoes[m] !== 'nenhum') ? '/app/projetos.html' : '/app/tarefas.html');
-// senha temporária ou fraca: primeiro cria a senha nova
-const destino = (u) => (u.trocar_senha ? '/senha.html?volta=' + encodeURIComponent(destino0(u)) : destino0(u));
-RP.api('/auth/me').then((r) => { location.replace(destino(r.usuario)); }).catch(() => {});
-RP.$('#f').addEventListener('submit', (e) => {
-  e.preventDefault();
-  RP.busy(RP.$('#go'), async () => {
-    RP.showAlert(msg, '', '');
-    const email = RP.$('#email').value.trim();
-    try {
-      const r = await RP.api('/auth/login', { method: 'POST', body: { email, senha: RP.$('#senha').value, lembrar: RP.$('#lembrar').checked } });
-      location.href = destino(r.usuario);
-    } catch (err) {
-      if (err.data && err.data.status === 'pendente_email') {
-        msg.className = 'alert info'; msg.hidden = false;
-        msg.innerHTML = `${RP.esc(err.message)}. <a href="/confirmar.html?email=${encodeURIComponent(email)}">Digitar o código</a>`;
-      } else RP.showAlert(msg, err.data && err.data.status ? 'info' : 'err', err.message);
-    }
-  });
-});
-</script>
+      <figure class="hero-mapa" aria-label="Exemplo de plano de rotas: 95 endereços em 11 estados, divididos entre 5 equipes saindo de Fortaleza">
+        <svg id="mapa" role="img" aria-hidden="true"></svg>
+        <figcaption>
+          <span class="legenda" id="legenda"></span>
+          <span>Exemplo de plano: 95 endereços em 11 estados, 5 equipes saindo de Fortaleza. Círculos vazados já foram concluídos.</span>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- O caminho de um projeto: sequência real, por isso numerada -->
+  <section class="caminho" id="caminho">
+    <div class="faixa">
+      <div class="titulo-secao">
+        <h2>Um caminho só, do cadastro ao recebimento</h2>
+        <p>Cada etapa alimenta a próxima. Ninguém redigita endereço, ninguém consolida planilha no fim do mês.</p>
+      </div>
+      <ol class="trilho">
+        <li><span class="parada">1</span><h3>Importar</h3><p>Cole ou suba a planilha de endereços (ou traga do NetBox). O sistema separa bairro, CEP e município e localiza cada endereço no mapa.</p></li>
+        <li><span class="parada">2</span><h3>Planejar</h3><p>Etapas por mês, meta de instalações, quantas equipes e se o material vai de avião, estrada ou com o técnico. O plano sai pronto, com rota por equipe.</p></li>
+        <li><span class="parada">3</span><h3>Distribuir</h3><p>Atividades padrão entram em todos os endereços. Uma regra manda cada atividade para a pessoa certa, inclusive nos endereços que chegarem depois.</p></li>
+        <li><span class="parada">4</span><h3>Executar</h3><p>O técnico inicia, preenche o checklist, tira fotos, registra patrimônio e inclui o que não estava previsto, como um poste ou uma escavação.</p></li>
+        <li><span class="parada">5</span><h3>Entregar</h3><p>Relatório em PDF com fotos, assinatura do cliente pelo celular e envio dos equipamentos para o monitoramento no Zabbix.</p></li>
+        <li><span class="parada">6</span><h3>Faturar</h3><p>Endereço concluído gera valor por item do contrato. A medição segue para aprovação, nota fiscal e recebimento.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- Painel de rotas -->
+  <section class="bloco" id="rotas">
+    <div class="faixa bloco-grade">
+      <div class="bloco-texto">
+        <h2>O plano do mês sai do mapa, não de uma reunião</h2>
+        <p>O Painel de rotas cruza endereços, equipes, produção por dia e logística e devolve quantas instalações cabem em cada mês, quem vai para onde e quando termina.</p>
+        <ul class="lista">
+          <li>Cenários com 1 a 8 equipes e término previsto de cada um</li>
+          <li>Meta mensal, estados e meses filtráveis, ordem da rota ajustada no mapa</li>
+          <li>Logística por endereço: avião, estrada ou equipamento com o técnico</li>
+          <li>Situação de cada endereço: a iniciar, em transporte, em execução, concluído</li>
+          <li>PDF do plano para apresentar ao cliente, geral ou por mês</li>
+        </ul>
+      </div>
+      <figure class="tela"><div class="tela-barra"><i></i><i></i><i></i><span>Painel de rotas</span></div><img src="/site/img/rota_mapa.webp" alt="Painel de rotas com o cenário de 5 equipes, término previsto, situação das agências e plano por mês" loading="lazy" width="1500" height="1125"></figure>
+    </div>
+  </section>
+
+  <!-- Execução -->
+  <section class="bloco inverso" id="execucao">
+    <div class="faixa bloco-grade">
+      <div class="bloco-texto">
+        <h2>Todos os endereços e atividades numa tela</h2>
+        <p>A Execução mostra, por endereço, o que já foi feito, com quem está e o que está travado. Dá para filtrar por estado, etapa e responsável e agir ali mesmo.</p>
+        <ul class="lista">
+          <li>Responsável de cada atividade: técnico, coordenação ou administrativo</li>
+          <li>Dependência entre atividades: uma só conclui depois da outra</li>
+          <li>Checklist e fotos de cada atividade, com relatório parcial ou final</li>
+          <li>Atividades extras por endereço, com quantidade, motivo e quem pediu</li>
+          <li>Itens do contrato por endereço: câmeras, servidores, switches</li>
+        </ul>
+      </div>
+      <figure class="tela"><div class="tela-barra"><i></i><i></i><i></i><span>Execução do projeto</span></div><img src="/site/img/execucao.webp" alt="Tela de Execução com os endereços, itens do contrato, monitoramento, extras e o andamento de cada atividade" loading="lazy" width="1500" height="1125"></figure>
+    </div>
+  </section>
+
+  <!-- App de campo -->
+  <section class="campo" id="campo">
+    <div class="faixa campo-grade">
+      <div class="campo-texto">
+        <h2>No campo, o celular é o formulário</h2>
+        <p>O técnico abre o app, vê as atividades do dia e trabalha mesmo onde o sinal não chega. Tudo fica guardado no aparelho e sobe sozinho quando a internet volta.</p>
+        <ul class="lista clara">
+          <li>Iniciar, pausar e concluir, com horário real gravado</li>
+          <li>Checklist com itens obrigatórios, texto, número e foto</li>
+          <li>Fotos com localização, anexadas ao item do checklist</li>
+          <li>Patrimônio e número de série lidos pela câmera</li>
+          <li>Atividade extra incluída no próprio endereço</li>
+          <li>Instala pela tela do celular, sem loja de aplicativos</li>
+        </ul>
+      </div>
+      <div class="celulares">
+        <figure class="celular"><img src="/site/img/m_hoje.webp" alt="App do técnico: atividades em aberto por endereço" loading="lazy" width="585" height="1266"></figure>
+        <figure class="celular alto"><img src="/site/img/m_check.webp" alt="App do técnico: checklist com itens obrigatórios e fotos" loading="lazy" width="585" height="1266"></figure>
+        <figure class="celular"><img src="/site/img/m_tarefa.webp" alt="App do técnico: atividade com registro de patrimônio" loading="lazy" width="585" height="1266"></figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Faturamento e patrimônio -->
+  <section class="bloco" id="faturamento">
+    <div class="faixa bloco-grade">
+      <div class="bloco-texto">
+        <h2>O faturamento nasce da conclusão</h2>
+        <p>Cada item do contrato tem preço. Quando o endereço é concluído, o valor aparece pronto para medir, com o detalhe de cada item. Sem conferência paralela.</p>
+        <ul class="lista">
+          <li>Valor por item e taxa por endereço, faturável ou só controle</li>
+          <li>Medição mensal com envio, aprovação, nota fiscal e recebimento</li>
+          <li>Receita por mês: gerado, previsto pelo plano, medido e recebido</li>
+          <li>Patrimônio exigido antes de medir, quando o contrato pede</li>
+          <li>Ativos por endereço, com patrimônio, série, situação e histórico</li>
+        </ul>
+      </div>
+      <figure class="tela"><div class="tela-barra"><i></i><i></i><i></i><span>Faturamento</span></div><img src="/site/img/faturamento.webp" alt="Tela de Faturamento com avanço, pronto para medir, faturado, recebido e receita por mês" loading="lazy" width="1500" height="1125"></figure>
+    </div>
+  </section>
+
+  <!-- Índice completo de recursos -->
+  <section class="recursos" id="recursos">
+    <div class="faixa">
+      <div class="titulo-secao">
+        <h2>Tudo o que vem no sistema</h2>
+        <p>Sem módulos escondidos: cada empresa liga e desliga o que cada perfil pode ver e fazer.</p>
+      </div>
+      <div class="indice">
+        <section><h3>Cadastro e planejamento</h3><ul>
+          <li>Clientes, contratos e aditivos</li><li>Importação e exportação em Excel</li><li>CEP, bairro e coordenadas pelo endereço</li><li>Etapas com data de início e ordem de atendimento</li><li>Equipes com dias de trabalho e produção por dia</li><li>Painel de rotas com cenários e PDF para o cliente</li></ul></section>
+        <section><h3>Execução</h3><ul>
+          <li>Atividades padrão e extras, com tempo e dependência</li><li>Distribuição em lote e regras por atividade</li><li>Tarefas da pessoa e delegadas ao escritório</li><li>Checklists com itens obrigatórios e por tipo</li><li>Chat por projeto, com pedidos e ocorrências</li><li>Conclusão manual com data</li></ul></section>
+        <section><h3>Campo</h3><ul>
+          <li>App instalável, funciona sem internet</li><li>Fotos com localização e legenda</li><li>Leitura de código de patrimônio pela câmera</li><li>Relatório em PDF parcial e final</li><li>Assinatura do cliente por link (WhatsApp ou e-mail)</li><li>Evidências do endereço em um arquivo .zip</li></ul></section>
+        <section><h3>Faturamento e patrimônio</h3><ul>
+          <li>Preço por item e taxa por endereço</li><li>Regra de cobrança por contrato</li><li>Medições com fluxo até o recebimento</li><li>Previsão de receita por mês</li><li>Ativos com patrimônio e número de série</li><li>Importação de ativos por planilha</li></ul></section>
+        <section><h3>Integrações</h3><ul>
+          <li>NetBox: sites e hosts viram endereços</li><li>Zabbix: equipamentos sobem para o monitoramento</li><li>Planilha modelo de monitoramento</li><li>E-mail para códigos, aprovações e avisos</li></ul></section>
+        <section><h3>Controle e segurança</h3><ul>
+          <li>Perfis com permissão por módulo e por ação</li><li>Auditoria: quem mudou o quê, quando e de onde</li><li>Aprovação de novos usuários</li><li>Senha temporária troca no primeiro acesso</li><li>Limite de tentativas de login</li><li>Dados isolados no banco, com acesso só pelo sistema</li></ul></section>
+      </div>
+    </div>
+  </section>
+
+  <!-- Para quem -->
+  <section class="publico">
+    <div class="faixa publico-grade">
+      <h2>Feito para quem instala em muitos lugares ao mesmo tempo</h2>
+      <dl>
+        <div><dt>Integradores de CFTV e alarme</dt><dd>Câmeras, servidores, licença e relatório de entrega por agência, loja ou unidade.</dd></div>
+        <div><dt>Operadoras e provedores</dt><dd>Ativação de links e equipamentos em lote, com monitoramento ao final.</dd></div>
+        <div><dt>Rollout de TI e redes</dt><dd>Troca de switches, pontos de acesso e estações em centenas de filiais.</dd></div>
+        <div><dt>Manutenção e infraestrutura</dt><dd>Visitas recorrentes com checklist, fotos e assinatura de quem recebeu.</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- Perguntas -->
+  <section class="perguntas" id="perguntas">
+    <div class="faixa perguntas-grade">
+      <h2>Perguntas frequentes</h2>
+      <div class="faq">
+        <details><summary>O técnico precisa de internet o tempo todo?</summary><p>Não. O app baixa as atividades e funciona sem sinal: status, checklist, fotos, patrimônio e extras ficam guardados no celular e são enviados sozinhos quando a conexão volta.</p></details>
+        <details><summary>Consigo aproveitar a planilha que já uso?</summary><p>Sim. Basta colar ou subir a planilha. O sistema reconhece as colunas de endereço, etapa, equipe, datas e itens (câmeras, servidores, switches) e avisa o que precisa ser corrigido antes de importar.</p></details>
+        <details><summary>Precisa instalar alguma coisa?</summary><p>O sistema roda no navegador. No celular, o técnico instala o app pela própria tela, sem passar por loja de aplicativos.</p></details>
+        <details><summary>Como o cliente final recebe a entrega?</summary><p>Pelo relatório em PDF com fotos e checklist. O cliente recebe um link por WhatsApp ou e-mail, confere e assina com o dedo ou o mouse; o PDF já sai com a assinatura.</p></details>
+        <details><summary>Integra com o nosso monitoramento?</summary><p>Sim, com o Zabbix: quando as atividades do endereço terminam, os equipamentos sobem como hosts, com o endereço no inventário. Do NetBox, dá para trazer sites e hosts como endereços.</p></details>
+        <details><summary>Quem vê o quê?</summary><p>Cada perfil tem permissão por módulo (não vê, vê ou edita) e por ação, como reabrir uma atividade ou excluir registros. Tudo o que muda fica na auditoria, com o antes e o depois.</p></details>
+        <details><summary>Como começa a implantação?</summary><p>Fazemos uma demonstração com uma amostra dos seus endereços, importamos a planilha do primeiro projeto, cadastramos atividades, checklists e preços do contrato e treinamos coordenação e técnicos.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contato -->
+  <section class="contato" id="contato">
+    <div class="faixa contato-grade">
+      <div class="contato-texto">
+        <h2>Veja o RoutProject com os seus endereços</h2>
+        <p>Conte o tamanho da operação. Montamos a demonstração com uma amostra do seu projeto, para você ver o plano, a execução e o faturamento com dados reais.</p>
+        <ul class="lista clara">
+          <li>Demonstração online, no horário que for melhor</li>
+          <li>Plano de rotas montado com a sua planilha</li>
+          <li>Proposta de acordo com o volume de endereços</li>
+        </ul>
+        <p class="ja">Já é cliente? <a href="/login.html">Entrar no sistema</a></p>
+      </div>
+      <form class="form" id="form" novalidate>
+        <div class="campo-f"><label for="f-nome">Nome</label><input id="f-nome" name="nome" autocomplete="name" required></div>
+        <div class="dupla">
+          <div class="campo-f"><label for="f-email">E-mail de trabalho</label><input id="f-email" name="email" type="email" autocomplete="email" required></div>
+          <div class="campo-f"><label for="f-tel">Telefone ou WhatsApp</label><input id="f-tel" name="telefone" type="tel" autocomplete="tel" inputmode="tel"></div>
+        </div>
+        <div class="dupla">
+          <div class="campo-f"><label for="f-emp">Empresa</label><input id="f-emp" name="empresa" autocomplete="organization"></div>
+          <div class="campo-f"><label for="f-end">Endereços por ano</label><select id="f-end" name="enderecos"><option value="">Escolha</option><option>Até 50</option><option>51 a 200</option><option>201 a 1.000</option><option>Mais de 1.000</option></select></div>
+        </div>
+        <fieldset class="campo-f interesse"><legend>O que você quer ver primeiro</legend>
+          <label><input type="checkbox" value="Rotas e planejamento"> Rotas e planejamento</label>
+          <label><input type="checkbox" value="App de campo"> App de campo</label>
+          <label><input type="checkbox" value="Faturamento"> Faturamento</label>
+          <label><input type="checkbox" value="Patrimônio"> Patrimônio</label>
+          <label><input type="checkbox" value="Integrações"> Integrações</label>
+        </fieldset>
+        <div class="campo-f"><label for="f-msg">Mensagem</label><textarea id="f-msg" name="mensagem" rows="3" placeholder="Ex.: 300 agências em 2027, 6 equipes próprias e 2 parceiras"></textarea></div>
+        <div class="escondido" aria-hidden="true"><label>Site <input name="site" tabindex="-1" autocomplete="off"></label></div>
+        <p class="aviso" id="aviso" role="status" aria-live="polite"></p>
+        <button class="btn ambar grande bloco-btn" id="enviar" type="submit">Agendar demonstração</button>
+        <p class="miudo">Usamos os seus dados só para responder este pedido.</p>
+      </form>
+    </div>
+  </section>
+</main>
+
+<footer class="rodape">
+  <div class="faixa rodape-grade">
+    <div>
+      <a class="marca" href="/"><span class="selo"><svg viewBox="0 0 24 24" fill="none" stroke="#0B3B36" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="18" r="2.2"/><circle cx="19" cy="6" r="2.2"/><path d="M7 17c5 0 3-10 10-10"/></svg></span><span>Rout<b>Project</b></span></a>
+      <p>Gestão de implantação em campo: rotas, equipes, app do técnico e faturamento por item.</p>
+    </div>
+    <nav aria-label="Rodapé"><a href="#caminho">Como funciona</a><a href="#recursos">Recursos</a><a href="#perguntas">Perguntas</a><a href="#contato" data-origem="Rodapé">Agendar demonstração</a><a href="/login.html">Entrar</a><a href="/cadastro.html">Pedir acesso</a></nav>
+    <p class="copy">© <span id="ano">2026</span> RoutProject</p>
+  </div>
+</footer>
+<script src="/site/site.js" defer></script>
 </body>
 </html>

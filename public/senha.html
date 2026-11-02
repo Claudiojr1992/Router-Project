@@ -33,8 +33,8 @@
 const pedido = new URLSearchParams(location.search).get('volta') || '';
 const volta = /^\/(app|m)\//.test(pedido) ? pedido : '/app/';
 const msg = RP.$('#msg');
-RP.api('/auth/me').then((r) => { if (!r.usuario.trocar_senha) RP.$('#lead').textContent = 'Troque a sua senha.'; }).catch(() => location.replace('/'));
-RP.$('#sair').onclick = async (e) => { e.preventDefault(); try { await RP.api('/auth/logout', { method: 'POST' }); } catch (_) { /* segue */ } location.href = '/'; };
+RP.api('/auth/me').then((r) => { if (!r.usuario.trocar_senha) RP.$('#lead').textContent = 'Troque a sua senha.'; }).catch(() => location.replace('/login.html'));
+RP.$('#sair').onclick = async (e) => { e.preventDefault(); try { await RP.api('/auth/logout', { method: 'POST' }); } catch (_) { /* segue */ } location.href = '/login.html'; };
 RP.$('#f').addEventListener('submit', (e) => {
   e.preventDefault();
   if (RP.$('#nova').value !== RP.$('#nova2').value) { RP.showAlert(msg, 'err', 'As senhas novas não conferem'); return; }

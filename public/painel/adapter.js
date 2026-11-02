@@ -30,7 +30,7 @@
       /* sem corpo */
     }
     if (res.status === 401) {
-      (window.top || window).location.href = '/?volta=' + encodeURIComponent('/app/rota.html');
+      (window.top || window).location.href = '/login.html?volta=' + encodeURIComponent('/app/rota.html');
       throw new Error('Sessão expirada');
     }
     if (!res.ok) throw new Error((data && data.erro) || 'Erro ' + res.status);

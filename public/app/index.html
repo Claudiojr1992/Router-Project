@@ -11,7 +11,7 @@
 RP.api('/auth/me')
   .then((r) => { const u = r.usuario, p = u.permissoes || {}; const ve = (m) => p[m] && p[m] !== 'nenhum';
     location.replace(u.perfil === 'admin' || ve('rota') || ve('projetos') || ve('clientes') ? '/app/projetos.html' : '/app/tarefas.html'); })
-  .catch(() => location.replace('/'));
+  .catch(() => location.replace('/login.html'));
 </script>
 </body>
 </html>

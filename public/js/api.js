@@ -16,7 +16,7 @@ const RP = (() => {
         location.href = '/senha.html?volta=' + encodeURIComponent(location.pathname + location.search);
       }
       if (res.status === 401 && location.pathname.startsWith('/app/')) {
-        location.href = '/?volta=' + encodeURIComponent(location.pathname + location.search);
+        location.href = '/login.html?volta=' + encodeURIComponent(location.pathname + location.search);
       }
       throw err;
     }

@@ -625,6 +625,14 @@ As ações menos usadas da lista de endereços (alterar ou excluir os listados, 
 - Nova ação de perfil **Incluir atividade extra num endereço** (liberada por padrão para os perfis internos). Migração `018_atividades_extras.sql`.
 - Extras não entram no cálculo de dias do Painel de rotas.
 
+## Site comercial e login
+
+- A página inicial (`/`) é o site de vendas: o que o sistema faz, o caminho de um projeto, telas reais, índice de recursos, perguntas frequentes e o formulário **Agendar demonstração**. O botão **Entrar** fica no topo; quem já está logado vê **Abrir o sistema**.
+- O login mudou para `/login.html` (links antigos com `?volta=` são redirecionados para lá).
+- Os pedidos do formulário ficam em **Contatos do site** (menu Configurações), com situação (novo, em contato, proposta enviada, fechado, descartado), anotações, exportação em Excel e atalho para e-mail e WhatsApp. Novo módulo de permissão `contatos` (migração `019_contatos_site.sql`).
+- Aviso por e-mail a cada pedido: vai para `SITE_CONTATO_EMAIL` (ou `ADMIN_EMAIL`), se o envio de e-mail estiver configurado. O formulário tem limite de 5 envios por hora por acesso e um campo escondido contra robôs.
+- Arquivos do site: `public/index.html`, `public/site/site.css`, `public/site/site.js` e as imagens em `public/site/img/`.
+
 ## Vercel + Supabase
 
 O mesmo código roda no Vercel como uma função só (`api/index.js`), com o banco no Supabase.

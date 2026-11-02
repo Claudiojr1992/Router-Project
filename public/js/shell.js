@@ -53,6 +53,7 @@ const Shell = (() => {
     { grp: 'Configurações' },
     { key: 'empresas', href: '/app/empresas.html', label: 'Empresas', icon: 'emp', mod: 'empresas' },
     { key: 'conexoes', href: '/app/conexoes.html', label: 'Conexões', icon: 'plug', mod: 'conexoes' },
+    { key: 'contatos', href: '/app/contatos.html', label: 'Contatos do site', icon: 'chat', mod: 'contatos' },
     { key: 'usuarios', href: '/app/usuarios.html', label: 'Usuários e acessos', icon: 'users', mod: 'usuarios' },
     { key: 'permissoes', href: '/app/permissoes.html', label: 'Permissões', icon: 'escudo', mod: 'permissoes' },
     { key: 'auditoria', href: '/app/auditoria.html', label: 'Auditoria', icon: 'hist', mod: 'auditoria' },
@@ -95,7 +96,7 @@ const Shell = (() => {
          <button type="button" role="menuitem" id="m-dados">${svg('user')}Meus dados e senha</button>
          <div class="metema" role="group" aria-label="Tema"><span>Tema</span><div>${[['auto', 'Automático', 'auto'], ['claro', 'Claro', 'sol'], ['escuro', 'Escuro', 'lua']].map(([k, t, ic]) => `<button type="button" data-tema="${k}" title="${t}" aria-label="Tema ${t}" aria-pressed="${temaAtual() === k}">${svg(ic)}</button>`).join('')}</div></div>
          <button type="button" role="menuitem" id="sair">${svg('sair')}Sair</button></div></div>`;
-    RP.$('#sair').onclick = async () => { try { await RP.api('/auth/logout', { method: 'POST' }); } catch (_) {} location.href = '/'; };
+    RP.$('#sair').onclick = async () => { try { await RP.api('/auth/logout', { method: 'POST' }); } catch (_) {} location.href = '/login.html'; };
     const mb = RP.$('#mebtn'), mm = RP.$('#memenu');
     const fechaMenu = () => { mm.hidden = true; mb.setAttribute('aria-expanded', 'false'); };
     mb.onclick = (e) => { e.stopPropagation(); mm.hidden = !mm.hidden; mb.setAttribute('aria-expanded', String(!mm.hidden)); };

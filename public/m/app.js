@@ -546,7 +546,7 @@
         <div class="card pad"><dl class="info"><dt>Nome</dt><dd>${esc(B.usuario.nome)}</dd><dt>Perfil</dt><dd>${esc(B.usuario.perfil)}</dd><dt>Versão</dt><dd>${VERSAO}</dd></dl></div>
         <div class="card pad" id="instalar" hidden><b>Instalar o app</b><p style="margin:6px 0 10px;color:var(--muted);font-size:.9rem">Coloca o RoutProject na tela inicial, com ícone próprio.</p><button class="btn primary block" id="btnInstalar">Instalar</button></div>
         <div class="card pad" id="iosDica" hidden><b>Instalar no iPhone</b><p style="margin:6px 0 0;color:var(--muted);font-size:.9rem">No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”.</p></div>
-        <a class="btn block" href="/">Abrir o sistema completo</a>
+        <a class="btn block" href="/app/">Abrir o sistema completo</a>
         <button class="btn block" id="sair" style="color:var(--err)">Sair</button>`,
     });
     if (deferredInstall) { $('#instalar').hidden = false; $('#btnInstalar').onclick = async () => { deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; $('#instalar').hidden = true; }; }
