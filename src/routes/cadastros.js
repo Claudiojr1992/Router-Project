@@ -40,6 +40,22 @@ function contratoBody(b) {
   ];
 }
 
+// Pessoas do relatório de entrega (analista projetista e quem elabora): só mexe quando o campo vem na requisição
+async function gravarPessoasRelatorio(c, id, b) {
+  for (const k of ['analista', 'elaborador']) {
+    if (b[k] === undefined) continue;
+    await c.query(`UPDATE contratos SET ${k} = $1 WHERE id = $2`, [v.str(b[k], k === 'analista' ? 'o analista projetista' : 'quem elabora o relatório', { max: 120, opcional: true }), id]);
+  }
+}
+// Símbolo da empresa (aparece no relatório): PNG/JPG em data URL; '' ou null remove
+function logoEmpresa(x) {
+  if (x === undefined) return undefined;
+  if (!x) return null;
+  if (typeof x !== 'string' || !/^data:image\/(png|jpe?g);base64,/.test(x)) throw new HttpError(400, 'Logo: use uma imagem PNG ou JPG');
+  if (x.length > 420000) throw new HttpError(400, 'Logo: imagem muito grande (máximo 300 KB)');
+  return x;
+}
+
 function empresaBody(b) {
   return [
     v.str(b.nome, 'o nome da empresa', { min: 2, max: 120 }),
@@ -217,16 +233,25 @@ module.exports = (app) => {
   });
 
   // ---------- Empresas (executora ou parceira do contrato) ----------
+  const EMP = `em.id, em.nome, em.cnpj, em.contato, em.email, em.telefone, em.ativo, em.criado_em, (em.logo IS NOT NULL) AS tem_logo`;
   app.get('/api/empresas', leitura, async () => db.many(
-    `SELECT em.*, (SELECT count(*)::int FROM contratos ct WHERE ct.empresa_id = em.id) AS contratos FROM empresas em ORDER BY em.ativo DESC, em.nome`));
-  app.post('/api/empresas', escrita, async (req) => db.one(
-    `INSERT INTO empresas (nome, cnpj, contato, email, telefone) VALUES ($1,$2,$3,$4,$5) RETURNING *`, empresaBody(req.body)));
-  app.put('/api/empresas/:id', escrita, async (req) => {
-    const r = await db.one(`UPDATE empresas SET nome=$1, cnpj=$2, contato=$3, email=$4, telefone=$5, ativo=$6 WHERE id = $7 RETURNING *`,
-      [...empresaBody(req.body), req.body.ativo !== false, v.id(req.params.id)]);
+    `SELECT ${EMP}, (SELECT count(*)::int FROM contratos ct WHERE ct.empresa_id = em.id) AS contratos FROM empresas em ORDER BY em.ativo DESC, em.nome`));
+  app.get('/api/empresas/:id/logo', leitura, async (req) => {
+    const r = await db.one(`SELECT logo FROM empresas WHERE id = $1`, [v.id(req.params.id)]);
     if (!r) throw new HttpError(404, 'Empresa não encontrada');
-    return r;
+    return { logo: r.logo };
   });
+  app.post('/api/empresas', { limit: 1024 * 1024 }, escrita, async (req) => db.one(
+    `INSERT INTO empresas AS em (nome, cnpj, contato, email, telefone, logo) VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${EMP}`, [...empresaBody(req.body), logoEmpresa(req.body.logo) || null]));
+  app.put('/api/empresas/:id', { limit: 1024 * 1024 }, escrita, async (req) => db.tx(async (c) => {
+    const id = v.id(req.params.id);
+    const r = (await c.query(`UPDATE empresas SET nome=$1, cnpj=$2, contato=$3, email=$4, telefone=$5, ativo=$6 WHERE id = $7 RETURNING id`,
+      [...empresaBody(req.body), req.body.ativo !== false, id])).rows[0];
+    if (!r) throw new HttpError(404, 'Empresa não encontrada');
+    const logo = logoEmpresa(req.body.logo);
+    if (logo !== undefined) await c.query(`UPDATE empresas SET logo = $1 WHERE id = $2`, [logo, id]);
+    return (await c.query(`SELECT ${EMP} FROM empresas em WHERE em.id = $1`, [id])).rows[0];
+  }));
 
   // ---------- Contratos ----------
   app.post('/api/clientes/:id/contratos', escrita, async (req) => db.tx(async (c) => {
@@ -237,16 +262,18 @@ module.exports = (app) => {
     for (const it of itens) await garantirItem(c, ct.id, it.nome);
     await gravarPrecos(c, ct.id, req.body.itens);
     if (req.body.atividades_padrao !== false) await copiarPadrao(c, ct.id); // um passo a menos: já nasce com as atividades
+    await gravarPessoasRelatorio(c, ct.id, req.body);
     return ct;
   }));
 
-  app.put('/api/contratos/:id', escrita, async (req) => {
-    const r = await db.one(
+  app.put('/api/contratos/:id', escrita, async (req) => db.tx(async (c) => {
+    const r = (await c.query(
       `UPDATE contratos SET numero=$1, tipo=$2, objeto=$3, vigencia_inicio=$4, vigencia_fim=$5, valor_camera=$6, valor_endereco=$7,
-              regra_cobranca=$8, status=$9, empresa_id=$10, exige_patrimonio=$11 WHERE id = $12 RETURNING *`, [...contratoBody(req.body), v.id(req.params.id)]);
+              regra_cobranca=$8, status=$9, empresa_id=$10, exige_patrimonio=$11 WHERE id = $12 RETURNING id`, [...contratoBody(req.body), v.id(req.params.id)])).rows[0];
     if (!r) throw new HttpError(404, 'Contrato não encontrado');
-    return r;
-  });
+    await gravarPessoasRelatorio(c, r.id, req.body);
+    return (await c.query(`SELECT * FROM contratos WHERE id = $1`, [r.id])).rows[0];
+  }));
 
   // PDF do contrato: enviado em base64 dentro do JSON (até 10 MB)
   app.post('/api/contratos/:id/arquivos', { limit: 15 * 1024 * 1024 }, escrita, async (req) => {

@@ -633,6 +633,14 @@ As ações menos usadas da lista de endereços (alterar ou excluir os listados, 
 - Aviso por e-mail a cada pedido: vai para `SITE_CONTATO_EMAIL` (ou `ADMIN_EMAIL`), se o envio de e-mail estiver configurado. O formulário tem limite de 5 envios por hora por acesso e um campo escondido contra robôs.
 - Arquivos do site: `public/index.html`, `public/site/site.css`, `public/site/site.js` e as imagens em `public/site/img/`.
 
+## Relatório técnico de entrega (PDF da atividade)
+
+- **Capa**: símbolo da empresa executora, título, projeto, unidade e as pessoas envolvidas (analista projetista, responsável pela implantação, relatório elaborado por e data), com o selo de relatório parcial ou final.
+- **Cabeçalho em quadro** em todas as páginas: logo, projeto, unidade, versão, situação, data, responsável, analista, setor e página X de Y.
+- **Corpo**: 1. Objetivo · 2. Identificação da unidade · 3. Itens do relatório (cada item do contrato com a quantidade e a tabela Nº, IP, patrimônio, nº de série e situação dos ativos instalados) · 4. Checklist de execução · 5. Execução, testes e monitoramento (Zabbix) · 6. Evidências de instalação (fotos agrupadas pelo item do checklist, com data, autor e localização) · 7. Termo de aceite.
+- **Assinatura do cliente genérica**: "Responsável pelo recebimento (cliente)" com nome, cargo/matrícula e data em branco; quando o cliente assina pelo link, a assinatura digital entra no lugar.
+- Onde cadastrar: **logo** em Empresas (PNG/JPG, reduzido no navegador); **analista projetista** e **relatório elaborado por** no contrato (Cadastro e endereços → Contratos). O responsável pela implantação é o técnico da atividade. Migração `020_relatorio_entrega.sql`.
+
 ## Vercel + Supabase
 
 O mesmo código roda no Vercel como uma função só (`api/index.js`), com o banco no Supabase.

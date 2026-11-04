@@ -771,7 +771,9 @@ function contratoCampos(x) {
       ${empresas.filter((e) => e.ativo || e.id === x.empresa_id).map((e) => `<option value="${e.id}" ${e.id === x.empresa_id ? 'selected' : ''}>${RP.esc(e.nome)}${e.cnpj ? ' · ' + RP.esc(e.cnpj) : ''}</option>`).join('')}
       <option value="nova">+ Cadastrar nova empresa…</option></select>
       <div id="c-emp-nova" hidden style="margin-top:8px"><div class="row"><input class="input" id="c-emp-n" placeholder="Nome da empresa" style="flex:2"><input class="input" id="c-emp-c" placeholder="CNPJ (opcional)" style="flex:1"></div></div>
-      <small>Aparece no cabeçalho dos relatórios e no faturamento.</small></div>
+      <small>O símbolo (logo) da empresa aparece na capa e no cabeçalho dos relatórios de entrega. Cadastre o logo em Empresas.</small></div>
+    <div class="row"><div style="flex:1">${f('c-ana', 'Analista projetista', x.analista, 'placeholder="Ex.: Vitor Andrade Damasceno"')}</div><div style="flex:1">${f('c-ela', 'Relatório elaborado por', x.elaborador, 'placeholder="Ex.: José Cláudio Rodrigues Júnior"')}</div></div>
+    <p class="muted" style="font-size:.85rem;margin:-6px 0 10px">Saem na capa e no cabeçalho do relatório de entrega, junto com o técnico responsável pela implantação de cada atividade.</p>
     <div class="field"><label for="c-tipo">Tipo</label><select class="input" id="c-tipo"><option value="principal">Contrato principal</option><option value="aditivo" ${x.tipo === 'aditivo' ? 'selected' : ''}>Aditivo</option></select></div>
     <div class="field"><label for="c-obj">Objeto</label><textarea class="input" id="c-obj">${RP.esc(x.objeto || '')}</textarea></div>
     <div class="row"><div style="flex:1">${f('c-ini', 'Início da vigência', x.vigencia_inicio, 'type="date"')}</div><div style="flex:1">${f('c-fim', 'Fim da vigência', x.vigencia_fim, 'type="date"')}</div></div>
@@ -791,7 +793,8 @@ async function empresaDoForm(el) {
 }
 function ligarEmpresa(el) { const s2 = RP.$('#c-emp', el); if (s2) s2.onchange = () => { RP.$('#c-emp-nova', el).hidden = s2.value !== 'nova'; if (s2.value === 'nova') RP.$('#c-emp-n', el).focus(); }; }
 const contratoBody = (el) => ({ numero: val(el, 'c-num'), tipo: val(el, 'c-tipo'), objeto: val(el, 'c-obj'), vigencia_inicio: val(el, 'c-ini'), vigencia_fim: val(el, 'c-fim'),
-  valor_endereco: dinheiro(val(el, 'c-ve')), regra_cobranca: val(el, 'c-reg'), exige_patrimonio: RP.$('#c-pat', el).checked });
+  valor_endereco: dinheiro(val(el, 'c-ve')), regra_cobranca: val(el, 'c-reg'), exige_patrimonio: RP.$('#c-pat', el).checked,
+  analista: val(el, 'c-ana'), elaborador: val(el, 'c-ela') });
 
 const blocoPadrao = `<label class="check" style="margin-top:14px"><input type="checkbox" id="c-pad" checked><span><b>Já incluir as atividades padrão</b><br><span class="muted">Coordenação, infra, instalação, configuração, validação e handover. Dá para ajustar depois.</span></span></label>`;
 const blocoItens = `<h3 style="font-size:1.15rem;margin:20px 0 4px">Itens e preços</h3>

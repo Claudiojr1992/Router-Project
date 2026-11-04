@@ -36,7 +36,7 @@ async function carregar(tarefaId) {
     `SELECT t.*, a.nome AS atividade, a.etapa, a.evidencia, a.checklist_id, ck.nome AS checklist,
             e.nome AS endereco, e.codigo, e.logradouro, e.bairro, e.cep, e.municipio, e.uf, e.cameras, e.lat, e.lon,
             ct.numero AS contrato, cl.nome AS cliente, p.nome AS responsavel, p.tipo AS responsavel_tipo,
-            emp.nome AS empresa, ck.relatorio AS modelo
+            emp.nome AS empresa, emp.logo AS empresa_logo, ct.analista, ct.elaborador, ck.relatorio AS modelo
        FROM tarefas t JOIN atividades a ON a.id = t.atividade_id
        LEFT JOIN checklists ck ON ck.id = a.checklist_id
        JOIN enderecos e ON e.id = t.endereco_id JOIN contratos ct ON ct.id = e.contrato_id JOIN clientes cl ON cl.id = ct.cliente_id
@@ -44,9 +44,13 @@ async function carregar(tarefaId) {
        LEFT JOIN pessoas p ON p.id = t.responsavel_id
       WHERE t.id = $1`, [tarefaId]);
   if (!t) return null;
-  const equip = await db.many(`SELECT ci.nome, ei.quantidade FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
-                                WHERE ei.endereco_id = $1 AND ei.quantidade > 0 ORDER BY ci.ordem, ci.id`, [t.endereco_id]);
-  t.equipamentos = equip;
+  const [equip, ativos, mon] = await Promise.all([
+    db.many(`SELECT ci.id AS item_id, ci.nome, ei.quantidade FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id
+              WHERE ei.endereco_id = $1 AND ei.quantidade > 0 ORDER BY ci.ordem, ci.id`, [t.endereco_id]),
+    db.many(`SELECT item_id, patrimonio, numero_serie, fabricante, modelo, ip, status FROM ativos WHERE endereco_id = $1 AND status <> 'baixado' ORDER BY item_id, ip NULLS LAST, id`, [t.endereco_id]),
+    db.many(`SELECT hostname, ip, tipo, status, enviado_em FROM monitoramento_ativos WHERE endereco_id = $1 ORDER BY hostname`, [t.endereco_id]).catch(() => []),
+  ]);
+  t.equipamentos = equip; t.ativos = ativos; t.monitoramento = mon;
   const [itens, fotos, eventos] = await Promise.all([
     t.checklist_id ? db.many(
       `SELECT i.id, i.ordem, i.texto, i.tipo_resposta, i.obrigatorio, r.valor, r.ok, r.criado_em, u.nome AS usuario,
@@ -70,20 +74,20 @@ async function carregar(tarefaId) {
 
 // ---------- Modelo do relatório ----------
 const MODELO_PADRAO = {
-  titulo: '', subtitulo: '', empresa: '', cor: '#0B3B36', logo: null,
+  titulo: '', subtitulo: '', empresa: '', cor: '#1F3864', logo: null,
   campos: [
-    { rotulo: 'Cliente', valor: '{cliente}' }, { rotulo: 'Contrato', valor: '{contrato}' }, { rotulo: 'Responsável', valor: '{responsavel}' },
-    { rotulo: 'Status', valor: '{status}' }, { rotulo: 'Início (real)', valor: '{inicio}' }, { rotulo: 'Conclusão (real)', valor: '{conclusao}' },
-    { rotulo: 'Duração', valor: '{duracao}' }, { rotulo: 'Câmeras', valor: '{cameras}' }, { rotulo: 'Previsto', valor: '{previsto}' },
-    { rotulo: 'Endereço', valor: '{logradouro}' },
+    { rotulo: 'Cliente final', valor: '{cliente}' }, { rotulo: 'Contrato', valor: '{contrato}' },
+    { rotulo: 'Unidade / código', valor: '{endereco} {codigo}' }, { rotulo: 'Endereço completo', valor: '{logradouro}' },
+    { rotulo: 'Empresa responsável pelo relatório', valor: '{empresa}' }, { rotulo: 'Atividade', valor: '{atividade}' },
+    { rotulo: 'Data de execução', valor: '{execucao}' },
   ],
-  introducao: '',
-  secoes: { equipamentos: true, checklist: true, historico: true, fotos: true },
-  termo: 'Declaro que os serviços descritos neste relatório foram executados e conferidos.',
-  assinaturas: ['Responsável técnico', 'Cliente'],
+  introducao: 'O presente documento tem como objetivo formalizar a entrega técnica da atividade {atividade} na unidade abaixo identificada, reunindo os itens instalados, o checklist de execução e as evidências fotográficas da instalação.',
+  secoes: { equipamentos: true, checklist: true, historico: false, fotos: true },
+  termo: 'O presente Termo de Aceite formaliza o recebimento deste relatório técnico, bem como a ciência e a concordância com as informações, os registros, as evidências, as condições e as especificações técnicas nele apresentadas.',
+  assinaturas: ['Responsável pela implantação', 'Responsável pelo recebimento (cliente)'],
 };
-const VARIAVEIS = ['cliente', 'contrato', 'empresa', 'atividade', 'endereco', 'codigo', 'municipio', 'uf', 'logradouro', 'responsavel', 'status',
-  'inicio', 'conclusao', 'duracao', 'previsto', 'cameras', 'equipamentos', 'data'];
+const VARIAVEIS = ['cliente', 'contrato', 'empresa', 'atividade', 'endereco', 'codigo', 'municipio', 'uf', 'logradouro', 'responsavel', 'analista', 'elaborador', 'status',
+  'inicio', 'conclusao', 'duracao', 'previsto', 'execucao', 'cameras', 'equipamentos', 'data'];
 
 const HEX = /^#[0-9a-f]{6}$/i;
 const txt = (v, max) => (v == null ? '' : String(v).slice(0, max));
@@ -123,24 +127,31 @@ async function desenhar(dados) {
   const { t, itens, fotos, eventos, assinatura } = dados;
   const md = t.modelo ? normalizarModelo(t.modelo) : MODELO_PADRAO;
   const corHead = (() => { const c = parseInt(md.cor.slice(1), 16); return rgb(((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255); })();
+  const empresa = md.empresa || t.empresa || '';
+  const execucao = t.realizada_fim || t.realizada_inicio;
   const vars = {
-    cliente: t.cliente, contrato: t.contrato, empresa: md.empresa || t.empresa || '', atividade: t.atividade, endereco: t.endereco, codigo: t.codigo || '',
-    municipio: t.municipio, uf: t.uf, logradouro: [t.logradouro, t.bairro, t.cep].filter(Boolean).join(' · ') || '—', responsavel: t.responsavel || '—',
+    cliente: t.cliente, contrato: t.contrato, empresa, atividade: t.atividade, endereco: t.endereco, codigo: t.codigo || '',
+    municipio: t.municipio, uf: t.uf, logradouro: [t.logradouro, t.bairro, t.cep ? 'CEP ' + t.cep : '', `${t.municipio}/${t.uf}`].filter(Boolean).join(', ') || '—',
+    responsavel: t.responsavel || '—', analista: t.analista || '—', elaborador: t.elaborador || '—',
     status: ST[t.status] || t.status, inicio: dataHora(t.realizada_inicio), conclusao: dataHora(t.realizada_fim), duracao: duracao(t.realizada_inicio, t.realizada_fim),
     previsto: t.prevista_inicio || t.prevista_fim ? `${data(t.prevista_inicio)} a ${data(t.prevista_fim)}` : '—', cameras: String(t.cameras ?? '—'),
     equipamentos: (t.equipamentos || []).map((e) => `${e.nome}: ${e.quantidade}`).join(', ') || '—', data: data(new Date().toISOString()),
+    execucao: execucao ? data(execucao) : '—',
   };
   const resolve = (s) => String(s || '').replace(/\{(\w+)\}/g, (m0, k) => (k in vars ? vars[k] : m0));
   const pdf = await PDFDocument.create();
   pdf.setTitle(limpa(`Relatório · ${t.atividade} · ${t.endereco}`));
-  pdf.setAuthor('RoutProject'); pdf.setCreator('RoutProject'); pdf.setProducer('RoutProject');
+  pdf.setAuthor(limpa(empresa || 'RoutProject')); pdf.setCreator('RoutProject'); pdf.setProducer('RoutProject');
   const F = await pdf.embedFont(StandardFonts.Helvetica);
   const FB = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const PW = 595.28, PH = 841.89, M = 40, CW = PW - 2 * M;
+  const FI = await pdf.embedFont(StandardFonts.HelveticaOblique);
+  const PW = 595.28, PH = 841.89, M = 48, CW = PW - 2 * M;
+  const HEAD_H = 64; // quadro de cabeçalho das páginas internas
   const final = t.status === 'concluida';
+  const tituloDoc = md.titulo ? resolve(md.titulo) : 'Relatório técnico de entrega';
   let page, y;
 
-    function quebra(s, f, sz, maxW) {
+  function quebra(s, f, sz, maxW) {
     const out = [];
     for (const par of limpa(s).split('\n')) {
       let linha = '';
@@ -153,168 +164,236 @@ async function desenhar(dados) {
     }
     return out;
   }
-  const texto = (s, x, yy, { f = F, sz = 9.5, c = C.ink, maxW } = {}) => {
+  const texto = (s, x, yy, { f = F, sz = 9.5, c = C.ink, maxW, lh = 1.35 } = {}) => {
     const linhas = maxW ? quebra(s, f, sz, maxW) : [limpa(s)];
-    linhas.forEach((l, i) => page.drawText(l, { x, y: yy - i * sz * 1.3, size: sz, font: f, color: c }));
-    return linhas.length * sz * 1.3;
+    linhas.forEach((l, i) => page.drawText(l, { x, y: yy - i * sz * lh, size: sz, font: f, color: c }));
+    return linhas.length * sz * lh;
+  };
+  const centro = (s, yy, f, sz, c = C.ink) => { const l = limpa(s); page.drawText(l, { x: (PW - f.widthOfTextAtSize(l, sz)) / 2, y: yy, size: sz, font: f, color: c }); };
+
+  // símbolo da empresa: logo da empresa executora, senão o logo do modelo do checklist
+  let logo = null;
+  for (const src of [t.empresa_logo, md.logo]) {
+    if (logo || !src) continue;
+    try { const b = Buffer.from(String(src).split(',')[1], 'base64'); logo = /png/.test(String(src).slice(0, 20)) ? await pdf.embedPng(b) : await pdf.embedJpg(b); } catch (_) { logo = null; }
+  }
+  const marca = (x, yy, w, h, tamTexto) => { // desenha o logo dentro da caixa (x, yy = canto inferior)
+    if (logo) { const s = Math.min(w / logo.width, h / logo.height); page.drawImage(logo, { x: x + (w - logo.width * s) / 2, y: yy + (h - logo.height * s) / 2, width: logo.width * s, height: logo.height * s }); return; }
+    page.drawRectangle({ x, y: yy, width: w, height: h, color: corHead });
+    const nome = limpa(empresa || 'RoutProject');
+    const linhas = quebra(nome, FB, tamTexto, w - 10).slice(0, 3);
+    linhas.forEach((l, i) => page.drawText(l, { x: x + (w - FB.widthOfTextAtSize(l, tamTexto)) / 2, y: yy + h / 2 + (linhas.length / 2 - i - 0.8) * tamTexto * 1.2, size: tamTexto, font: FB, color: C.white }));
   };
 
-  let logo = null;
-  if (md.logo) { try { const b = Buffer.from(md.logo.split(',')[1], 'base64'); logo = /png/.test(md.logo.slice(0, 20)) ? await pdf.embedPng(b) : await pdf.embedJpg(b); } catch (_) { logo = null; } }
-  const empresaTopo = md.empresa || t.empresa || '';
-  function novaPagina() {
-    page = pdf.addPage([PW, PH]);
-    page.drawRectangle({ x: 0, y: PH - 54, width: PW, height: 54, color: corHead });
-    let xT = M;
-    if (logo) { const s = Math.min(110 / logo.width, 34 / logo.height); page.drawImage(logo, { x: M, y: PH - 27 - (logo.height * s) / 2, width: logo.width * s, height: logo.height * s }); xT = M + logo.width * s + 12; }
-    else if (empresaTopo) { page.drawText(limpa(empresaTopo).slice(0, 40), { x: M, y: PH - 34, size: 15, font: FB, color: C.white }); xT = M + Math.min(FB.widthOfTextAtSize(limpa(empresaTopo).slice(0, 40), 15), 230) + 14; }
-    else {
-      page.drawText('Rout', { x: M, y: PH - 34, size: 17, font: FB, color: C.white });
-      page.drawText('Project', { x: M + FB.widthOfTextAtSize('Rout', 17), y: PH - 34, size: 17, font: FB, color: C.amber });
-      xT = M + 118;
-    }
-    page.drawText(limpa(md.titulo ? resolve(md.titulo) : 'Relatório de atividade').slice(0, 48), { x: xT, y: PH - 32, size: 9, font: FB, color: rgb(0.86, 0.92, 0.9) });
-    const selo = final ? 'RELATÓRIO FINAL' : 'RELATÓRIO PARCIAL';
-    const sw = FB.widthOfTextAtSize(selo, 8.5) + 16;
-    page.drawRectangle({ x: PW - M - sw, y: PH - 38, width: sw, height: 18, color: final ? C.ok : C.amber });
-    page.drawText(selo, { x: PW - M - sw + 8, y: PH - 32.5, size: 8.5, font: FB, color: final ? C.white : C.head });
-    y = PH - 78;
+  // ---------- capa ----------
+  page = pdf.addPage([PW, PH]);
+  marca((PW - 150) / 2, PH - 300, 150, 150, 20);
+  let yc = PH - 360;
+  for (const l of quebra(tituloDoc.toUpperCase(), FB, 19, CW - 40)) { centro(l, yc, FB, 19, corHead); yc -= 25; }
+  yc -= 4;
+  for (const l of quebra(md.subtitulo ? resolve(md.subtitulo) : t.atividade, F, 12.5, CW - 60)) { centro(l, yc, F, 12.5, C.ink); yc -= 17; }
+  yc -= 22;
+  centro(`PROJETO ${String(t.cliente || '').toUpperCase()}${t.contrato ? ' · CONTRATO ' + t.contrato : ''}`, yc, FB, 12, C.ink);
+  yc -= 20;
+  centro(`${t.endereco}${t.codigo ? ' · ' + t.codigo : ''} · ${t.municipio}/${t.uf}`, yc, F, 11, C.muted);
+  yc -= 44;
+  const pessoas = [['Analista projetista', vars.analista], ['Responsável pela implantação', vars.responsavel], ['Relatório elaborado por', vars.elaborador], ['Data', vars.data]];
+  for (const [k, v] of pessoas) {
+    const a = limpa(k + ': '), b = limpa(v), w = FB.widthOfTextAtSize(a, 10.5) + F.widthOfTextAtSize(b, 10.5), x0 = (PW - w) / 2;
+    page.drawText(a, { x: x0, y: yc, size: 10.5, font: FB, color: C.ink });
+    page.drawText(b, { x: x0 + FB.widthOfTextAtSize(a, 10.5), y: yc, size: 10.5, font: F, color: C.ink });
+    yc -= 17;
   }
-  const precisa = (h) => { if (y - h < 50) novaPagina(); };
+  const selo = final ? 'RELATÓRIO FINAL' : 'RELATÓRIO PARCIAL · ATIVIDADE EM ANDAMENTO';
+  const sw = FB.widthOfTextAtSize(selo, 8.5) + 20;
+  page.drawRectangle({ x: (PW - sw) / 2, y: yc - 26, width: sw, height: 20, color: final ? C.ok : C.amber });
+  centro(selo, yc - 19.5, FB, 8.5, final ? C.white : C.head);
+  if (empresa) centro(empresa, 70, F, 9, C.muted);
+
+  // ---------- páginas internas ----------
+  function novaPagina() { page = pdf.addPage([PW, PH]); y = PH - 30 - HEAD_H - 26; }
+  const precisa = (h) => { if (y - h < 56) novaPagina(); };
+  let nSec = 0;
   const secao = (titulo) => {
-    precisa(40); y -= 8;
-    page.drawText(limpa(titulo).toUpperCase(), { x: M, y, size: 9, font: FB, color: C.accent });
-    page.drawLine({ start: { x: M, y: y - 5 }, end: { x: PW - M, y: y - 5 }, thickness: 0.8, color: C.line });
+    precisa(56); y -= 6; nSec += 1;
+    page.drawText(limpa(`${nSec}. ${titulo}`), { x: M, y, size: 13, font: FB, color: corHead });
     y -= 20;
   };
-
-  novaPagina();
-  // título
-  y -= texto(md.titulo ? resolve(md.titulo) : t.atividade, M, y, { f: FB, sz: 18, maxW: CW }) - 4;
-  if (md.subtitulo) y -= texto(resolve(md.subtitulo), M, y, { sz: 11, maxW: CW });
-  y -= texto(`${md.titulo ? t.atividade + ' · ' : ''}${t.endereco} · ${t.municipio}/${t.uf}${t.codigo ? ' · ' + t.codigo : ''}`, M, y, { sz: 11, c: C.muted, maxW: CW });
-  y -= 8;
-
-  // quadro de informações
-  const campos = md.campos.map((c) => [c.rotulo, resolve(c.valor) || '—']);
-  const colW = CW / 2, linhaH = 30, nL = Math.ceil(campos.length / 2);
-  page.drawRectangle({ x: M, y: y - nL * linhaH - 6, width: CW, height: nL * linhaH + 10, color: C.soft, borderColor: C.line, borderWidth: 0.6 });
-  campos.forEach(([k, v], i) => {
-    const cx = M + 10 + (i % 2) * colW, cy = y - 6 - Math.floor(i / 2) * linhaH;
-    page.drawText(limpa(k).toUpperCase(), { x: cx, y: cy - 6, size: 7, font: FB, color: C.muted });
-    const linhas = quebra(v, F, 10, colW - 20);
-    page.drawText(linhas[0] || '', { x: cx, y: cy - 19, size: 10, font: F, color: C.ink });
-  });
-  y -= nL * linhaH + 18;
-  if (md.introducao) { precisa(40); y -= texto(resolve(md.introducao), M, y, { sz: 9.5, maxW: CW }) + 6; }
-  if (t.evidencia) { y -= texto(`Evidência exigida: ${t.evidencia}`, M, y, { sz: 9, c: C.muted, maxW: CW }) + 2; }
-  if (md.secoes.equipamentos && t.equipamentos && t.equipamentos.length) {
-    secao('Equipamentos do endereço');
-    y -= texto(t.equipamentos.map((e) => `${e.nome}: ${e.quantidade}`).join('   ·   '), M, y, { sz: 9.5, maxW: CW }) + 4;
-  }
-
-  // checklist
-  if (md.secoes.checklist && t.checklist_id) {
-    const feitos = itens.filter((i) => i.ok || (i.tipo_resposta === 'foto' && i.fotos > 0)).length;
-    const faltam = itens.filter((i) => i.obrigatorio && !(i.ok || (i.tipo_resposta === 'foto' && i.fotos > 0)));
-    secao(`Checklist · ${t.checklist} (${feitos}/${itens.length})`);
-    if (faltam.length) { precisa(20); y -= texto(`Itens obrigatórios pendentes: ${faltam.length}`, M, y, { f: FB, sz: 9, c: C.err }) + 4; }
-    for (const i of itens) {
-      const feito = i.ok || (i.tipo_resposta === 'foto' && i.fotos > 0);
-      const resp = i.tipo_resposta === 'foto' ? (i.fotos ? `${i.fotos} foto(s)` : 'sem foto')
-        : i.tipo_resposta === 'check' ? (i.ok ? 'Feito' : 'Não marcado') : (i.valor || '—');
-      const linhas = quebra(`${i.texto}${i.obrigatorio ? ' *' : ''}`, F, 9.5, CW - 200);
-      const h = Math.max(30, linhas.length * 12.5 + 14);
-      precisa(h);
-      page.drawRectangle({ x: M, y: y - 9, width: 11, height: 11, borderColor: feito ? C.ok : (i.obrigatorio ? C.err : C.line), borderWidth: 1.2, color: feito ? C.ok : C.white });
-      if (feito) page.drawText('OK', { x: M + 1.2, y: y - 6, size: 5.5, font: FB, color: C.white });
-      linhas.forEach((l, k) => page.drawText(l, { x: M + 20, y: y - 7 - k * 12.5, size: 9.5, font: F, color: C.ink }));
-      page.drawText(limpa(resp).slice(0, 40), { x: PW - M - 175, y: y - 7, size: 9, font: FB, color: feito ? C.ink : C.muted });
-      if (i.usuario || i.criado_em) page.drawText(limpa(`${i.usuario || ''} ${i.criado_em ? dataHora(i.criado_em) : ''}`).trim().slice(0, 44), { x: PW - M - 175, y: y - 18, size: 7, font: F, color: C.muted });
-      page.drawLine({ start: { x: M, y: y - h + 6 }, end: { x: PW - M, y: y - h + 6 }, thickness: 0.4, color: C.line });
+  const sub = (titulo, detalhe) => {
+    precisa(40);
+    page.drawText(limpa(titulo), { x: M, y, size: 10, font: FB, color: C.ink });
+    if (detalhe) page.drawText(limpa(detalhe), { x: M, y: y - 13, size: 9, font: F, color: C.muted });
+    y -= detalhe ? 26 : 15;
+  };
+  // tabela com cabeçalho escuro; colunas: [{ t, w, b }] (w em fração de CW)
+  function tabela(cols, linhas, { vazio = '—' } = {}) {
+    const ws = cols.map((c) => c.w * CW), pad = 6, sz = 9;
+    const cab = () => {
+      precisa(40);
+      page.drawRectangle({ x: M, y: y - 20, width: CW, height: 20, color: corHead });
+      let x = M; cols.forEach((c, i) => { page.drawText(limpa(c.t), { x: x + pad, y: y - 13.5, size: 8.5, font: FB, color: C.white }); x += ws[i]; });
+      y -= 20;
+    };
+    cab();
+    for (const ln of linhas.length ? linhas : [cols.map((_, i) => (i === 0 ? vazio : ''))]) {
+      const parts = ln.map((v, i) => quebra(v == null || v === '' ? '—' : String(v), cols[i].b ? FB : F, sz, ws[i] - 2 * pad));
+      const h = Math.max(20, Math.max(...parts.map((p) => p.length)) * sz * 1.3 + 9);
+      if (y - h < 56) { novaPagina(); cab(); }
+      page.drawRectangle({ x: M, y: y - h, width: CW, height: h, borderColor: C.line, borderWidth: 0.6 });
+      let x = M;
+      parts.forEach((p, i) => {
+        if (i) page.drawLine({ start: { x, y }, end: { x, y: y - h }, thickness: 0.6, color: C.line });
+        p.forEach((l, k) => page.drawText(l, { x: x + pad, y: y - 13 - k * sz * 1.3, size: sz, font: cols[i].b ? FB : F, color: C.ink }));
+        x += ws[i];
+      });
       y -= h;
     }
-    precisa(14); y -= texto('* item obrigatório', M, y - 2, { sz: 7.5, c: C.muted }) + 2;
+    y -= 14;
   }
 
-  // histórico e comentários
-  const hist = eventos.filter((e) => e.tipo === 'comentario' || e.tipo === 'status');
-  if (md.secoes.historico && hist.length) {
-    secao('Histórico e comentários');
-    for (const e of hist) {
-      const quem = `${dataHora(e.criado_em)} · ${e.usuario || 'Sistema'}`;
-      const det = e.tipo === 'status' ? `Status: ${String(e.detalhe).replace(/a_fazer|em_andamento|aguardando|concluida/g, (m) => ST[m])}` : e.detalhe;
-      const linhas = quebra(det, F, 9.5, CW - 150);
-      precisa(linhas.length * 12.5 + 8);
-      page.drawText(limpa(quem), { x: M, y, size: 8, font: F, color: C.muted });
-      linhas.forEach((l, k) => page.drawText(l, { x: M + 150, y: y - k * 12.5, size: 9.5, font: e.tipo === 'comentario' ? F : F, color: C.ink }));
-      y -= linhas.length * 12.5 + 6;
-    }
-  }
+  novaPagina();
+  // 1. objetivo
+  secao('Objetivo do documento');
+  y -= texto(resolve(md.introducao || MODELO_PADRAO.introducao), M, y, { sz: 10, maxW: CW, lh: 1.45 }) + 10;
+  if (t.evidencia) y -= texto(`Evidência exigida nesta atividade: ${t.evidencia}`, M, y, { f: FI, sz: 9, c: C.muted, maxW: CW }) + 8;
 
-  // fotos (2 por linha)
-  if (md.secoes.fotos && fotos.length) {
-    precisa(270);
-    secao(`Fotos (${fotos.length})`);
-    const gap = 14, fw = (CW - gap) / 2, fh = 190;
-    for (let k = 0; k < fotos.length; k += 2) {
-      precisa(fh + 36);
-      for (let j = 0; j < 2 && k + j < fotos.length; j++) {
-        const f = fotos[k + j];
-        const x = M + j * (fw + gap);
-        let img = null;
-        try { img = f.mime === 'image/png' ? await pdf.embedPng(f.conteudo) : await pdf.embedJpg(f.conteudo); } catch (_) { img = null; }
-        page.drawRectangle({ x, y: y - fh, width: fw, height: fh, color: C.soft, borderColor: C.line, borderWidth: 0.6 });
-        if (img) {
-          const s = Math.min(fw / img.width, fh / img.height);
-          const w = img.width * s, h = img.height * s;
-          page.drawImage(img, { x: x + (fw - w) / 2, y: y - fh + (fh - h) / 2, width: w, height: h });
-        } else page.drawText('Imagem em formato não suportado no PDF', { x: x + 10, y: y - fh / 2, size: 8, font: F, color: C.muted });
-        const leg = [f.item || f.legenda || 'Foto geral', dataHora(f.tirada_em || f.criado_em), f.lat != null ? `${(+f.lat).toFixed(5)}, ${(+f.lon).toFixed(5)}` : ''].filter(Boolean).join(' · ');
-        quebra(leg, F, 7.5, fw).slice(0, 2).forEach((l, n) => page.drawText(l, { x, y: y - fh - 11 - n * 9.5, size: 7.5, font: F, color: C.muted }));
+  // 2. identificação
+  secao('Identificação da unidade');
+  tabela([{ t: 'Campo', w: 0.36 }, { t: 'Informação', w: 0.64 }], md.campos.map((c) => [c.rotulo, resolve(c.valor) || '—']));
+
+  // 3. itens do relatório: cada item do contrato no endereço, com os ativos (patrimônio, série, IP) registrados
+  if (md.secoes.equipamentos && (t.equipamentos || []).length) {
+    secao('Itens do relatório');
+    const ativos = t.ativos || [];
+    const letras = 'abcdefghijklmnopqrstuvwxyz';
+    t.equipamentos.forEach((e, k) => {
+      const lista = ativos.filter((a) => a.item_id === e.item_id);
+      const marcas = [...new Set(lista.map((a) => [a.fabricante, a.modelo].filter(Boolean).join(' · ')).filter(Boolean))];
+      sub(`${letras[k % 26]}) ${e.nome} · Quantidade: ${String(e.quantidade).padStart(2, '0')}`, marcas.length ? `Marca / modelo: ${marcas.join('; ')}` : '');
+      if (lista.length) {
+        tabela([{ t: 'Nº', w: 0.08, b: true }, { t: 'IP de rede', w: 0.2, b: true }, { t: 'Patrimônio', w: 0.22 }, { t: 'Nº de série', w: 0.3, b: true }, { t: 'Situação', w: 0.2 }],
+          lista.map((a, i) => [String(i + 1).padStart(2, '0'), a.ip || 'SEM', a.patrimonio || 'SEM', a.numero_serie || 'SEM', a.status === 'instalado' ? 'Instalado' : a.status]));
+      } else {
+        precisa(18); y -= texto('Patrimônio e número de série ainda não registrados para este item.', M, y, { f: FI, sz: 8.5, c: C.muted }) + 10;
       }
-      y -= fh + 34;
+    });
+  }
+
+  // 4. checklist
+  if (md.secoes.checklist && t.checklist_id) {
+    const feitos = itens.filter((i) => i.ok || (i.tipo_resposta === 'foto' && i.fotos > 0)).length;
+    secao(`Checklist de execução · ${t.checklist} (${feitos}/${itens.length})`);
+    tabela([{ t: 'Item verificado', w: 0.5 }, { t: 'Resultado', w: 0.22, b: true }, { t: 'Registrado por', w: 0.28 }],
+      itens.map((i) => {
+        const feito = i.ok || (i.tipo_resposta === 'foto' && i.fotos > 0);
+        const resp = i.tipo_resposta === 'foto' ? (i.fotos ? `${i.fotos} foto(s)` : 'Sem foto') : i.tipo_resposta === 'check' ? (i.ok ? 'Conforme' : 'Pendente') : (i.valor || 'Pendente');
+        return [`${i.texto}${i.obrigatorio ? ' *' : ''}`, feito ? resp : resp, [i.usuario, i.criado_em ? dataHora(i.criado_em) : ''].filter(Boolean).join(' · ')];
+      }));
+    y += 6; precisa(14); y -= texto('* item obrigatório', M, y, { sz: 7.5, c: C.muted }) + 8;
+  }
+
+  // 5. execução e monitoramento
+  {
+    const mon = t.monitoramento || [];
+    secao(mon.length ? 'Execução, testes e monitoramento' : 'Execução');
+    tabela([{ t: 'Início real', w: 0.25 }, { t: 'Conclusão real', w: 0.25 }, { t: 'Duração', w: 0.2 }, { t: 'Status', w: 0.3, b: true }],
+      [[vars.inicio, vars.conclusao, vars.duracao, vars.status]]);
+    if (mon.length) {
+      tabela([{ t: 'Host', w: 0.34 }, { t: 'IP', w: 0.2, b: true }, { t: 'Tipo', w: 0.18 }, { t: 'Monitoramento (Zabbix)', w: 0.28 }],
+        mon.map((m) => [m.hostname, m.ip, m.tipo, m.status === 'enviado' ? 'Ativo' + (m.enviado_em ? ' desde ' + data(m.enviado_em) : '') : m.status === 'erro' ? 'Erro no envio' : 'Pendente']));
     }
   }
 
-  // termo de aceite e assinaturas
-  if (md.termo || md.assinaturas.length) {
-    precisa(170);
-    secao('Aceite');
-    if (md.termo) { y -= texto(resolve(md.termo), M, y, { sz: 9.5, maxW: CW }) + 10; }
-    const n = md.assinaturas.length;
-    if (n) {
-      precisa(110);
-      const gap = 24, w = (CW - gap * (n - 1)) / n, base = y - 62;
-      // a assinatura digital do cliente vai no rótulo "Cliente" (ou no último)
-      const ic = md.assinaturas.findIndex((a) => /cliente/i.test(a)), iCli = ic >= 0 ? ic : n - 1;
-      let img = null;
-      if (assinatura && assinatura.imagem) { try { img = await pdf.embedPng(assinatura.imagem); } catch (_) { img = null; } }
-      md.assinaturas.forEach((rot, i) => {
-        const x = M + i * (w + gap);
-        if (i === iCli && img) {
-          const s = Math.min((w - 10) / img.width, 50 / img.height);
-          page.drawImage(img, { x: x + (w - img.width * s) / 2, y: base + 4, width: img.width * s, height: img.height * s });
+  // 6. evidências de instalação: fotos agrupadas pelo item do checklist
+  if (md.secoes.fotos && fotos.length) {
+    precisa(300);
+    secao(`Evidências de instalação (${fotos.length} foto${fotos.length > 1 ? 's' : ''})`);
+    const grupos = [];
+    for (const f of fotos) { const g = f.item || 'Registro fotográfico geral'; let gr = grupos.find((x) => x.nome === g); if (!gr) grupos.push((gr = { nome: g, fotos: [] })); gr.fotos.push(f); }
+    const gap = 14, fw = (CW - gap) / 2, fh = 200;
+    for (const g of grupos) {
+      precisa(fh + 60);
+      page.drawText(limpa(g.nome).slice(0, 95), { x: M, y, size: 9.5, font: FB, color: C.ink }); y -= 14;
+      for (let k = 0; k < g.fotos.length; k += 2) {
+        precisa(fh + 34);
+        for (let j = 0; j < 2 && k + j < g.fotos.length; j++) {
+          const f = g.fotos[k + j], x = M + j * (fw + gap);
+          let img = null;
+          try { img = f.mime === 'image/png' ? await pdf.embedPng(f.conteudo) : await pdf.embedJpg(f.conteudo); } catch (_) { img = null; }
+          page.drawRectangle({ x, y: y - fh, width: fw, height: fh, color: C.white, borderColor: C.line, borderWidth: 0.8 });
+          if (img) {
+            const s = Math.min((fw - 12) / img.width, (fh - 12) / img.height), w = img.width * s, h = img.height * s;
+            page.drawImage(img, { x: x + (fw - w) / 2, y: y - fh + (fh - h) / 2, width: w, height: h });
+          } else page.drawText('Imagem em formato não suportado no PDF', { x: x + 10, y: y - fh / 2, size: 8, font: F, color: C.muted });
+          const leg = [f.legenda, dataHora(f.tirada_em || f.criado_em), f.usuario, f.lat != null ? `${(+f.lat).toFixed(5)}, ${(+f.lon).toFixed(5)}` : ''].filter(Boolean).join(' · ');
+          quebra(leg, FI, 7.5, fw).slice(0, 2).forEach((l, n) => page.drawText(l, { x, y: y - fh - 11 - n * 9.5, size: 7.5, font: FI, color: C.muted }));
         }
-        page.drawLine({ start: { x, y: base }, end: { x: x + w, y: base }, thickness: 0.8, color: C.ink });
-        page.drawText(limpa(rot).slice(0, 40), { x, y: base - 12, size: 8.5, font: FB, color: C.ink });
-        if (i === iCli && assinatura) {
-          const linhas = [assinatura.nome, [assinatura.cargo, assinatura.documento].filter(Boolean).join(' · '), `Assinado digitalmente em ${dataHora(assinatura.assinado_em)}`].filter(Boolean);
-          linhas.forEach((l, k) => page.drawText(limpa(l).slice(0, 60), { x, y: base - 24 - k * 10, size: 7.5, font: F, color: C.muted }));
-        } else page.drawText('Nome / data', { x, y: base - 24, size: 7.5, font: F, color: C.muted });
-      });
-      y = base - 60;
+        y -= fh + 32;
+      }
     }
   }
 
-  // rodapé com número de página
-  const pags = pdf.getPages();
-  const gerado = `Gerado em ${dataHora(new Date())} pelo RoutProject`;
-  pags.forEach((p, i) => {
+  // histórico (opcional)
+  const hist = eventos.filter((e) => e.tipo === 'comentario' || e.tipo === 'status' || e.tipo === 'extra');
+  if (md.secoes.historico && hist.length) {
+    secao('Histórico e observações');
+    tabela([{ t: 'Data e responsável', w: 0.3 }, { t: 'Registro', w: 0.7 }], hist.map((e) => [`${dataHora(e.criado_em)} · ${e.usuario || 'Sistema'}`,
+      e.tipo === 'status' ? `Status: ${String(e.detalhe).replace(/a_fazer|em_andamento|aguardando|concluida/g, (m) => ST[m])}` : e.detalhe]));
+  }
+
+  // 7. termo de aceite: assinatura do cliente genérica (nome, cargo e data em branco), ou a assinatura digital, se houver
+  if (md.termo || md.assinaturas.length) {
+    precisa(220);
+    secao('Termo de aceite');
+    if (md.termo) y -= texto(resolve(md.termo), M, y, { sz: 10, maxW: CW, lh: 1.45 }) + 16;
+    const rots = md.assinaturas.length ? md.assinaturas : MODELO_PADRAO.assinaturas;
+    const n = rots.length, gap = 30, w = (CW - gap * (n - 1)) / n;
+    precisa(130);
+    const base = y - 64;
+    const ic = rots.findIndex((a) => /cliente|recebimento/i.test(a)), iCli = ic >= 0 ? ic : n - 1;
+    let img = null;
+    if (assinatura && assinatura.imagem) { try { img = await pdf.embedPng(assinatura.imagem); } catch (_) { img = null; } }
+    rots.forEach((rot, i) => {
+      const x = M + i * (w + gap);
+      if (i === iCli && img) { const s = Math.min((w - 10) / img.width, 54 / img.height); page.drawImage(img, { x: x + (w - img.width * s) / 2, y: base + 4, width: img.width * s, height: img.height * s }); }
+      page.drawLine({ start: { x, y: base }, end: { x: x + w, y: base }, thickness: 0.8, color: C.ink });
+      const r = limpa(rot).slice(0, 48); page.drawText(r, { x: x + (w - FB.widthOfTextAtSize(r, 9)) / 2, y: base - 13, size: 9, font: FB, color: C.ink });
+      let linhas;
+      if (i === iCli) linhas = assinatura ? [assinatura.nome, [assinatura.cargo, assinatura.documento].filter(Boolean).join(' · '), `Assinado digitalmente em ${dataHora(assinatura.assinado_em)}`].filter(Boolean)
+        : ['Nome: ______________________________', 'Cargo / matrícula: ____________________', 'Data: ____/____/________'];
+      else linhas = [i === 0 ? vars.responsavel : '', empresa].filter(Boolean);
+      linhas.forEach((l, k) => { const s2 = limpa(l).slice(0, 60); page.drawText(s2, { x: x + (w - F.widthOfTextAtSize(s2, 8.5)) / 2, y: base - 28 - k * 14, size: 8.5, font: F, color: C.muted }); });
+    });
+    y = base - 80;
+  }
+
+  // cabeçalho em quadro (páginas internas) e rodapé com a numeração
+  const pags = pdf.getPages(), tot = pags.length;
+  const hoje = data(new Date().toISOString());
+  pags.forEach((p, idx) => {
+    page = p;
+    if (idx > 0) {
+      const top = PH - 30, x0 = 24, W = PW - 48, lw = 78, c1 = 0.42 * (W - lw), c2 = 0.2 * (W - lw), h2 = HEAD_H / 2;
+      const cel = (x, yy, w, h) => p.drawRectangle({ x, y: yy, width: w, height: h, borderColor: C.ink, borderWidth: 0.7 });
+      cel(x0, top - HEAD_H, lw, HEAD_H);
+      marca(x0 + 6, top - HEAD_H + 6, lw - 12, HEAD_H - 12, 9);
+      const xa = x0 + lw, xb = xa + c1, xc = xb + c2, wc = W - lw - c1 - c2;
+      [[xa, c1], [xb, c2], [xc, wc]].forEach(([x, w]) => { cel(x, top - h2, w, h2); cel(x, top - HEAD_H, w, h2); });
+      const par = (x, yy, k, v, w) => { const a = limpa(k + ': '); p.drawText(a, { x: x + 6, y: yy, size: 8, font: FB, color: C.ink }); const b = quebra(v, F, 8, w - 12 - FB.widthOfTextAtSize(a, 8))[0] || ''; p.drawText(b, { x: x + 6 + FB.widthOfTextAtSize(a, 8), y: yy, size: 8, font: F, color: C.ink }); };
+      par(xa, top - 13, 'Projeto', String(t.cliente || '').toUpperCase(), c1);
+      par(xa, top - 25, 'Unidade', `${t.endereco} · ${t.municipio}/${t.uf}`.toUpperCase(), c1);
+      par(xb, top - 13, 'Versão', '1.0', c2);
+      par(xb, top - 25, 'Situação', final ? 'Final' : 'Parcial', c2);
+      par(xc, top - 13, 'Data', hoje, wc);
+      par(xa, top - h2 - 13, 'Responsável', vars.responsavel, c1);
+      par(xa, top - h2 - 25, 'Analista', vars.analista, c1);
+      par(xb, top - h2 - 13, 'Setor', 'Implantação', c2);
+      par(xc, top - h2 - 13, 'Página', `${idx + 1} de ${tot}`, wc);
+    }
     p.drawLine({ start: { x: M, y: 34 }, end: { x: PW - M, y: 34 }, thickness: 0.5, color: C.line });
-    p.drawText(limpa(gerado), { x: M, y: 22, size: 7.5, font: F, color: C.muted });
-    const n = `Página ${i + 1} de ${pags.length}`;
-    p.drawText(n, { x: PW - M - F.widthOfTextAtSize(n, 7.5), y: 22, size: 7.5, font: F, color: C.muted });
+    p.drawText(limpa(`${tituloDoc} · ${t.atividade} · gerado em ${dataHora(new Date())}`).slice(0, 110), { x: M, y: 22, size: 7, font: F, color: C.muted });
+    const nn = `Página ${idx + 1} de ${tot}`;
+    p.drawText(nn, { x: PW - M - F.widthOfTextAtSize(nn, 7.5), y: 22, size: 7.5, font: F, color: C.muted });
   });
 
   const nome = limpa(`Relatorio_${t.endereco}_${t.atividade}`).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 90) + '.pdf';

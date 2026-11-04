@@ -33,7 +33,12 @@ function exemplo(modelo, empresa) {
       bairro: 'Campina', cep: '66010-000', cliente: 'Cliente de exemplo', contrato: '001/2026', empresa, responsavel: 'Técnico de exemplo', status: 'concluida',
       realizada_inicio: new Date(agora - 26 * 3600e3).toISOString(), realizada_fim: new Date(agora - 2 * 3600e3).toISOString(), cameras: 12,
       prevista_inicio: null, prevista_fim: null, checklist_id: 1, checklist: 'Checklist de instalação', evidencia: null, modelo,
-      equipamentos: [{ nome: 'Câmera', quantidade: 12 }, { nome: 'Servidor / NVR', quantidade: 1 }] },
+      analista: 'Analista de exemplo', elaborador: 'Coordenação de exemplo',
+      equipamentos: [{ item_id: 1, nome: 'Câmera', quantidade: 2 }, { item_id: 2, nome: 'Servidor / NVR', quantidade: 1 }],
+      ativos: [{ item_id: 1, ip: '10.30.6.22', patrimonio: 'PAT-0001', numero_serie: 'BE05F24PAJE02D5', fabricante: 'Dahua', modelo: 'SD5A432GB-HNR', status: 'instalado' },
+        { item_id: 1, ip: '10.30.6.23', patrimonio: null, numero_serie: '4E02960PAG20A04', fabricante: 'Dahua', modelo: 'HDBW5431EN', status: 'instalado' },
+        { item_id: 2, ip: '10.30.6.21', patrimonio: null, numero_serie: 'AM07ECFPAJ27A5D', fabricante: 'Dahua', modelo: 'NVR5216-16P-EI', status: 'instalado' }],
+      monitoramento: [{ hostname: 'AG001-NVR01', ip: '10.30.6.21', tipo: 'nvr', status: 'enviado', enviado_em: new Date(agora - 3600e3).toISOString() }] },
     itens: [
       { texto: 'Câmeras fixadas e alinhadas', tipo_resposta: 'check', obrigatorio: true, ok: true, usuario: 'Técnico de exemplo', criado_em: new Date(agora - 5 * 3600e3).toISOString() },
       { texto: 'Foto de cada câmera instalada', tipo_resposta: 'foto', obrigatorio: true, fotos: 12 },

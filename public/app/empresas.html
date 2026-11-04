@@ -25,26 +25,53 @@ const f = (id, label, val = '', extra = '') => `<div class="field"><label for="$
 async function carregar() {
   lista = await RP.api('/empresas');
   S.content.innerHTML = lista.length ? `<div class="card"><div class="scroll"><table class="tbl"><thead><tr><th>Empresa</th><th>CNPJ</th><th>Contato</th><th>Contratos</th><th>Situação</th></tr></thead><tbody>
-    ${lista.map((e) => `<tr class="click" data-id="${e.id}" tabindex="0"><td><b>${RP.esc(e.nome)}</b></td><td>${RP.esc(e.cnpj || '—')}</td>
+    ${lista.map((e) => `<tr class="click" data-id="${e.id}" tabindex="0"><td><b>${RP.esc(e.nome)}</b>${e.tem_logo ? ' <span class="muted" style="font-size:.8rem">· com logo</span>' : ''}</td><td>${RP.esc(e.cnpj || '—')}</td>
       <td>${RP.esc([e.contato, e.email, e.telefone].filter(Boolean).join(' · ') || '—')}</td><td>${e.contratos}</td><td>${e.ativo ? 'Ativa' : '<span class="muted">Inativa</span>'}</td></tr>`).join('')}</tbody></table></div></div>`
     : '<div class="card empty"><p style="margin:0 0 6px"><b>Nenhuma empresa ainda.</b></p><p style="margin:0">Cadastre a empresa que executa cada contrato. Ela aparece no cabeçalho dos relatórios e no faturamento.</p></div>';
   RP.$$('tr.click', S.content).forEach((r) => { r.onclick = () => editar(lista.find((e) => e.id === +r.dataset.id)); r.onkeydown = (ev) => { if (ev.key === 'Enter') r.onclick(); }; });
 }
 
-function editar(e) {
+// Símbolo da empresa: reduz no navegador para caber no relatório (até 600 px, PNG ou JPG)
+function lerLogo(file) {
+  return new Promise((ok, erro) => {
+    if (!/^image\/(png|jpe?g)$/.test(file.type)) return erro(new Error('Use uma imagem PNG ou JPG'));
+    const im = new Image(), url = URL.createObjectURL(file);
+    im.onload = () => {
+      const k = Math.min(1, 600 / Math.max(im.width, im.height)), cv = document.createElement('canvas');
+      cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k);
+      cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+      let d = cv.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.9);
+      if (d.length > 400000) d = cv.toDataURL('image/jpeg', 0.82);
+      ok(d);
+    };
+    im.onerror = () => erro(new Error('Não foi possível ler a imagem'));
+    im.src = url;
+  });
+}
+
+async function editar(e) {
   const x = e || {};
-  RP.drawer(e ? 'Editar empresa' : 'Nova empresa', `
+  let logo = e && e.tem_logo ? (await RP.api(`/empresas/${e.id}/logo`).catch(() => ({}))).logo || null : null, mudouLogo = false;
+  const d = RP.drawer(e ? 'Editar empresa' : 'Nova empresa', `
     ${f('em-n', 'Nome', x.nome, 'required')}
     <div class="row"><div style="flex:1">${f('em-c', 'CNPJ', x.cnpj)}</div><div style="flex:1">${f('em-t', 'Telefone', x.telefone, 'inputmode="tel"')}</div></div>
     ${f('em-p', 'Contato (nome)', x.contato)}${f('em-e', 'E-mail', x.email, 'type="email"')}
+    <div class="field"><label for="em-l">Símbolo da empresa (logo)</label>
+      <div class="row" style="gap:12px;align-items:center"><div id="em-prev" style="width:96px;height:96px;border:1px dashed var(--line);border-radius:10px;display:grid;place-items:center;background:#fff;overflow:hidden"></div>
+        <div style="display:flex;flex-direction:column;gap:6px"><input type="file" id="em-l" accept="image/png,image/jpeg"><button type="button" class="btn sm" id="em-lx">Remover logo</button></div></div>
+      <small>Aparece na capa e no cabeçalho de todas as páginas dos relatórios de entrega. PNG ou JPG.</small></div>
     ${e ? `<label class="check"><input type="checkbox" id="em-a" ${x.ativo ? 'checked' : ''}> Empresa ativa (aparece para escolher nos contratos)</label>` : ''}`, {
     onSave: async (el) => {
       const body = { nome: RP.$('#em-n', el).value, cnpj: RP.$('#em-c', el).value, telefone: RP.$('#em-t', el).value, contato: RP.$('#em-p', el).value, email: RP.$('#em-e', el).value,
-        ativo: e ? RP.$('#em-a', el).checked : true };
+        ativo: e ? RP.$('#em-a', el).checked : true, ...(mudouLogo || !e ? { logo } : {}) };
       if (e) await RP.api('/empresas/' + e.id, { method: 'PUT', body }); else await RP.api('/empresas', { method: 'POST', body });
       RP.toast('Empresa salva'); carregar();
     },
   });
+  const prev = () => { RP.$('#em-prev', d.el).innerHTML = logo ? `<img src="${logo}" alt="Logo da empresa" style="max-width:100%;max-height:100%">` : '<span class="muted" style="font-size:.8rem">Sem logo</span>'; RP.$('#em-lx', d.el).hidden = !logo; };
+  prev();
+  RP.$('#em-l', d.el).onchange = async (ev) => { const fl = ev.target.files[0]; if (!fl) return; try { logo = await lerLogo(fl); mudouLogo = true; prev(); } catch (er) { RP.toast(er.message); } };
+  RP.$('#em-lx', d.el).onclick = () => { logo = null; mudouLogo = true; RP.$('#em-l', d.el).value = ''; prev(); };
 }
 </script>
 </body>
