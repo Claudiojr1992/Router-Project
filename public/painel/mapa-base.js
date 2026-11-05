@@ -80,6 +80,7 @@
     svg.querySelectorAll('#map > g:not(.esq) text').forEach((t) => {
       if (t._f0 === undefined) t._f0 = +t.getAttribute('font-size') || 11;
       t.setAttribute('font-size', (t._f0 * kr).toFixed(4));
+      if (t.dataset.sw) t.setAttribute('stroke-width', (+t.dataset.sw * kr).toFixed(4));
     });
     svg.style.setProperty('--k', kr);
   }

@@ -146,15 +146,18 @@ const _BB = (() => {
     a1 = Math.min(...la),
     o0 = Math.min(...lo),
     o1 = Math.max(...lo);
-  const mg = Math.max(0.1, (a0 - a1) * 0.12, (o1 - o0) * 0.08);
+  // projeto concentrado (ex.: um prédio ou uma cidade): enquadra de perto, no nível da rua
+  const ext = Math.max(a0 - a1, o1 - o0),
+    MIN = ext < 0.08 ? Math.max(0.012, ext * 1.6) : 0.5;
+  const mg = Math.max(ext < 0.08 ? 0.002 : 0.1, (a0 - a1) * 0.12, (o1 - o0) * 0.08);
   a0 += mg;
   a1 -= mg;
   o0 -= mg;
   o1 += mg;
-  if (a0 - a1 < 0.5) {
+  if (a0 - a1 < MIN) {
     const m = (a0 + a1) / 2;
-    a0 = m + 0.25;
-    a1 = m - 0.25;
+    a0 = m + MIN / 2;
+    a1 = m - MIN / 2;
   }
   const kc = Math.cos((((a0 + a1) / 2) * Math.PI) / 180),
     w = (o1 - o0) * kc,
@@ -176,7 +179,7 @@ const LON0 = _BB[0],
   LAT0 = _BB[2],
   LAT1 = _BB[3],
   KC = Math.cos(((D.estatico ? 12 : (LAT0 + LAT1) / 2) * Math.PI) / 180),
-  SS = D.estatico ? 38 : Math.max(14, Math.min(400, 620 / (LAT0 - LAT1)));
+  SS = D.estatico ? 38 : Math.max(14, Math.min(Math.max(400, 200 / (LAT0 - LAT1)), 620 / (LAT0 - LAT1)));
 // Projeção de Mercator (a mesma dos mapas de ruas): o desenho casa com as imagens do OpenStreetMap
 const MERC = (la) => (-Math.log(Math.tan(Math.PI / 4 + (Math.max(-85, Math.min(85, la)) * Math.PI) / 360)) * 180) / Math.PI;
 const SS2 = KC * SS,
@@ -1491,7 +1494,8 @@ function drawMap(rows) {
         'text',
         {
           x,
-          y: y + 3.5,
+          y,
+          'dominant-baseline': 'central',
           fill: 'var(--panel)',
           'font-size': 9.5,
           'font-weight': 700,
@@ -1501,6 +1505,31 @@ function drawMap(rows) {
         },
         gN,
       ).textContent = r.seq;
+  });
+  // vários endereços no mesmo local (ex.: salas de um prédio): selo com a quantidade sobre o ponto
+  (D.grupos || []).forEach((g) => {
+    const vis_ = g.ids.filter((id) => planned.has(id)).length;
+    if (!vis_) return;
+    const [x, y] = px(g.la + 0.0016, g.lo);
+    el(
+      'text',
+      {
+        x,
+        y,
+        fill: 'var(--ink)',
+        stroke: 'var(--panel)',
+        'stroke-width': 3.5,
+        'data-sw': 3.5,
+        'paint-order': 'stroke',
+        'font-size': 12,
+        'font-weight': 700,
+        'text-anchor': 'middle',
+        'font-family': '"Barlow Condensed",Arial',
+        'pointer-events': 'none',
+        class: 'gp-selo',
+      },
+      gN,
+    ).textContent = `${g.n} endereços neste local`;
   });
 }
 const DOC =
