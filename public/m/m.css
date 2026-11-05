@@ -82,7 +82,7 @@ main.pg{padding:14px 14px calc(96px + var(--safe-b));display:flex;flex-direction
 .in{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);min-height:44px;margin-top:6px}
 textarea.in{min-height:80px;resize:vertical}
 .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-.thumb{width:72px;height:72px;border-radius:10px;object-fit:cover;background:var(--soft);border:1px solid var(--line);position:relative;display:block}
+.thumb{width:72px;height:72px;border-radius:10px;object-fit:cover;object-position:center bottom;background:var(--soft);border:1px solid var(--line);position:relative;display:block}
 .thumbw{position:relative}
 .thumbw .q{position:absolute;right:3px;bottom:3px;background:var(--amber);color:#0B3B36;font-size:.62rem;font-weight:700;border-radius:6px;padding:0 4px}
 .cam{width:72px;height:72px;border-radius:10px;border:2px dashed var(--line);background:var(--soft);display:grid;place-items:center;cursor:pointer;color:var(--accent)}

@@ -3,7 +3,7 @@
 // e as fotos ficam guardadas até a conexão voltar. A sincronização envia fotos primeiro, depois as ações.
 (() => {
   'use strict';
-  const VERSAO = '1.2.0';
+  const VERSAO = '1.3.0';
   const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -721,7 +721,16 @@
 
   // ---------------- Início ----------------
   (async () => {
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/m/sw.js', { scope: '/m/' }).catch(() => {});
+    // Versão nova publicada: o app se atualiza sozinho (procura ao abrir e ao voltar para a tela) e recarrega uma vez
+    if ('serviceWorker' in navigator) {
+      const tinha = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.register('/m/sw.js', { scope: '/m/', updateViaCache: 'none' }).then((reg) => {
+        reg.update().catch(() => {});
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+      }).catch(() => {});
+      let recarregou = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (tinha && !recarregou) { recarregou = true; location.reload(); } });
+    }
     try { await carregarLocal(); } catch (_) { /* navegador sem IndexedDB */ }
     if (B) { B = aplicarPendentes(B); rota(); }
     if (!navigator.onLine) { if (!B) telaLogin('Sem internet. Conecte-se uma vez para baixar suas atividades.'); return; }
