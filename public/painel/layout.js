@@ -5,9 +5,11 @@
   const tabs = [...document.querySelectorAll('[data-ptab]')];
   const panes = [...document.querySelectorAll('[data-pane]')];
   const hint = document.getElementById('ptabs-hint');
+  const guardar = (v) => { try { localStorage.setItem('rp-painel-aba', v); } catch (_) { /* sem armazenamento */ } };
   function abrir(v) {
     tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.ptab === v)));
     panes.forEach((p) => (p.hidden = p.dataset.pane !== v));
+    guardar(v);
     if (v === 'mapa' && window.rpMapaBase) requestAnimationFrame(() => window.rpMapaBase());
     resumo();
   }
@@ -26,7 +28,7 @@
   }));
   const r0 = render;
   render = function () { const x = r0.apply(this, arguments); try { resumo(); } catch (_) { /* ignora */ } return x; };
-  // o painel sempre abre no mapa (a aba de regras fica a um clique); ?aba=plano abre direto nas regras
-  const ini = (location.search.match(/[?&]aba=(\w+)/) || [])[1] || 'mapa';
+  let ini = 'mapa';
+  try { ini = localStorage.getItem('rp-painel-aba') || 'mapa'; } catch (_) { /* sem armazenamento */ }
   abrir(tabs.some((t) => t.dataset.ptab === ini) ? ini : 'mapa');
 })();

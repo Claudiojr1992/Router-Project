@@ -168,30 +168,17 @@ function montarDados(cliente, enderecos, extra = {}) {
     units.push({ id: e.id, n: e.nome, m: e.municipio, uf: String(e.uf || '').toUpperCase(), la: +(+la).toFixed(4), lo: +(+lo).toFixed(4), c: e.cameras || 0, ka: aer.km, ap: aer.nome, aprox, et: e.etapa_id || null, eo: e.ordem_etapa || null, d: dias(e), ...plano(e) });
   }
 
-  // endereços no mesmo ponto
-  //  - sem coordenada (centro do município): espalha em um pequeno círculo (~1,5 km)
-  //  - com coordenada real (ex.: várias salas do mesmo prédio): espalha bem perto do ponto (dezenas de metros),
-  //    em espiral, e o painel mostra um selo com a quantidade naquele local
+  // endereços no mesmo ponto (ex.: várias agências pelo centro do mesmo município): espalha em um pequeno círculo (~1,5 km)
   const mesmos = new Map();
-  for (const u of units) { const k = `${u.aprox ? 'a' : 'r'}|${u.la}|${u.lo}`; if (!mesmos.has(k)) mesmos.set(k, []); mesmos.get(k).push(u); }
-  const grupos = [];
+  for (const u of units) { const k = `${u.la}|${u.lo}`; if (!mesmos.has(k)) mesmos.set(k, []); mesmos.get(k).push(u); }
   for (const g of mesmos.values()) {
     if (g.length < 2) continue;
-    if (g[0].aprox) {
-      g.forEach((u, i) => { const a = (2 * Math.PI * i) / g.length; u.la = +(u.la + 0.014 * Math.sin(a)).toFixed(4); u.lo = +(u.lo + 0.014 * Math.cos(a)).toFixed(4); });
-      continue;
-    }
-    const la0 = g[0].la, lo0 = g[0].lo, cs = Math.cos((la0 * Math.PI) / 180) || 1;
-    grupos.push({ la: la0, lo: lo0, n: g.length, ids: g.map((u) => u.id) });
-    g.forEach((u, i) => {
-      const r = 0.00016 * Math.sqrt(i + 0.6), a = i * 2.39996; // espiral de Vogel (ângulo áureo): preenche um disco
-      u.la = +(la0 + r * Math.sin(a)).toFixed(6); u.lo = +(lo0 + (r * Math.cos(a)) / cs).toFixed(6); u.gp = grupos.length;
-    });
+    g.forEach((u, i) => { const a = (2 * Math.PI * i) / g.length; u.la = +(u.la + 0.014 * Math.sin(a)).toFixed(4); u.lo = +(u.lo + 0.014 * Math.cos(a)).toFixed(4); });
   }
 
   // endereço praticamente em cima da base (mesma cidade, sem coordenada): afasta um pouco para não ficar escondido sob a estrela
   for (const u of units) {
-    if (!u.gp && haversine(u.la, u.lo, base.la, base.lo) < 0.8) { u.la = +(u.la - 0.02).toFixed(4); u.lo = +(u.lo + 0.03).toFixed(4); }
+    if (haversine(u.la, u.lo, base.la, base.lo) < 0.8) { u.la = +(u.la - 0.02).toFixed(4); u.lo = +(u.lo + 0.03).toFixed(4); }
   }
 
   // matriz de distâncias (0 = base de saída)
@@ -233,7 +220,7 @@ function montarDados(cliente, enderecos, extra = {}) {
   const hol = feriados(ano, ano + 3);
   const P = { ...mapdata().P, START: proximoDiaUtil(hol) };
 
-  return { units, km: KM, tr, hol, O, E, B: {}, links: {}, P, estatico: false, titulo: cliente.nome, base, semCoord, etapas, equipes: cliente.equipes || null, grupos };
+  return { units, km: KM, tr, hol, O, E, B: {}, links: {}, P, estatico: false, titulo: cliente.nome, base, semCoord, etapas, equipes: cliente.equipes || null };
 }
 
 const parametros = () => mapdata().P;
