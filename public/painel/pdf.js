@@ -90,8 +90,10 @@ function mapSVG(rows, o) {
     vy = (y0 + y1) / 2 - h / 2,
     u = w / 560,
     f = (v) => v.toFixed(1);
+  if (o.vb) o.vb.push(vx, vy, w, h);
   let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${f(vx)} ${f(vy)} ${f(w)} ${f(h)}" width="${Math.round(o.bw * 3)}" height="${Math.round(o.bh * 3)}">`;
-  s += `<rect x="${f(vx - 10)}" y="${f(vy - 10)}" width="${f(w + 20)}" height="${f(h + 20)}" fill="${PX.ocean}"/>`;
+  if (!o.semFundo) s += `<rect x="${f(vx - 10)}" y="${f(vy - 10)}" width="${f(w + 20)}" height="${f(h + 20)}" fill="${PX.ocean}"/>`;
+  if (!o.semFundo) {
   for (let lo = Math.ceil(LON0 / 5) * 5; lo <= LON1; lo += 5) {
     const [x] = px(0, lo);
     s += `<line x1="${f(x)}" y1="${f(vy)}" x2="${f(x)}" y2="${f(vy + h)}" stroke="${PX.grat}" stroke-width="${f(u)}"/>`;
@@ -105,6 +107,7 @@ function mapSVG(rows, o) {
     const [x, y] = px(la, lo);
     s += `<text x="${f(x)}" y="${f(y)}" fill="${PX.coast}" font-size="${f(17 * u)}" font-weight="700" font-family="Arial,Helvetica,sans-serif" text-anchor="middle" letter-spacing="${f(1.5 * u)}">${t}</text>`;
   });
+  }
   const inR = new Set(rows.map((r) => r.id));
   D.units.forEach((un) => {
     if (inR.has(un.id)) return;
@@ -140,6 +143,73 @@ function mapSVG(rows, o) {
   }
   s += `<polygon points="${st}" fill="${PX.ink}" stroke="#FFFFFF" stroke-width="${f(1.3 * u)}"/><text x="${f(bx + 12 * u)}" y="${f(by - 8 * u)}" fill="${PX.ink}" font-size="${f(10.5 * u)}" font-weight="700" font-family="Arial,Helvetica,sans-serif">${RP_BASE.toUpperCase()} · BASE</text></svg>`;
   return s;
+}
+// Mapa do PDF com o mesmo mapa de ruas da tela: as imagens (mesma projeção de Mercator) vão por baixo do desenho das rotas.
+// Sem mapa de ruas (desligado ou falhou), usa o mapa esquemático.
+const tilesPdf = new Map();
+function tileImg(url) {
+  if (!tilesPdf.has(url))
+    tilesPdf.set(url, new Promise((res) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => res(null);
+      im.src = url;
+    }));
+  return tilesPdf.get(url);
+}
+async function mapaPng(rows, o) {
+  const URL_T = window.RP_TILES;
+  if (URL_T && !D.estatico) {
+    try {
+      const vb = [];
+      const over = mapSVG(rows, { ...o, semFundo: true, vb });
+      const [vx, vy, w, h] = vb;
+      const CW = Math.round(o.bw * 3), CH = Math.round(o.bh * 3);
+      const T = (z) => (256 * Math.pow(2, z)) / 360;
+      const k = CW / w; // px do PDF por unidade do desenho
+      const z = Math.max(2, Math.min(18, Math.round(Math.log2((k * SS2 * 360) / 256))));
+      const mundo = (x, y) => [(x / SS2 + LON0 + 180) * T(z), (y / SS2 + MY0 + 180) * T(z)];
+      const [X0, Y0] = mundo(vx, vy), [X1, Y1] = mundo(vx + w, vy + h);
+      const n = Math.pow(2, z);
+      const tx0 = Math.max(0, Math.floor(X0 / 256)), tx1 = Math.min(n - 1, Math.floor(X1 / 256));
+      const ty0 = Math.max(0, Math.floor(Y0 / 256)), ty1 = Math.min(n - 1, Math.floor(Y1 / 256));
+      if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) > 120) throw new Error('muitas imagens');
+      const c = document.createElement('canvas');
+      c.width = CW; c.height = CH;
+      const g = c.getContext('2d');
+      g.fillStyle = '#E8EEEC';
+      g.fillRect(0, 0, CW, CH);
+      const esc = CW / (X1 - X0); // px do PDF por px do mundo
+      const lista = [];
+      for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) lista.push([tx, ty]);
+      let ok = 0;
+      // poucas de cada vez: o servidor de mapas pede poucas conexões
+      for (let i = 0; i < lista.length; i += 6) {
+        const ims = await Promise.all(lista.slice(i, i + 6).map(([tx, ty]) => tileImg(URL_T.replace('{z}', z).replace('{x}', tx).replace('{y}', ty).replace('{s}', 'abc'[(tx + ty) % 3]))));
+        ims.forEach((im, j) => {
+          if (!im) return;
+          const [tx, ty] = lista[i + j];
+          g.drawImage(im, (tx * 256 - X0) * esc, (ty * 256 - Y0) * esc, 256 * esc + 0.6, 256 * esc + 0.6);
+          ok++;
+        });
+      }
+      if (!ok) throw new Error('mapa de ruas indisponível');
+      // véu leve para as rotas aparecerem sobre o mapa, como na tela
+      g.fillStyle = 'rgba(255,255,255,0.18)';
+      g.fillRect(0, 0, CW, CH);
+      const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(over); });
+      g.drawImage(img, 0, 0, CW, CH);
+      g.font = `${Math.round(9 * 3 * 0.55)}px Arial`;
+      const attr = '© OpenStreetMap';
+      const tw = g.measureText(attr).width;
+      g.fillStyle = 'rgba(255,255,255,0.85)'; g.fillRect(CW - tw - 14, CH - 22, tw + 14, 22);
+      g.fillStyle = '#333'; g.fillText(attr, CW - tw - 7, CH - 7);
+      return await new Promise((res, rej) => c.toBlob((b) => (b ? b.arrayBuffer().then((a) => res(new Uint8Array(a)), rej) : rej(new Error('Falha ao desenhar o mapa'))), 'image/png'));
+    } catch (e) {
+      console.warn('PDF sem mapa de ruas:', e.message);
+    }
+  }
+  return svgPng(mapSVG(rows, o), o.bw, o.bh);
 }
 function svgPng(s, bw, bh) {
   return new Promise((res, rej) => {
@@ -442,7 +512,7 @@ async function coverPage(d, c) {
     mw = d.CW - LW - 18,
     my = 176,
     mh = d.BOT - my - 14;
-  await d.image(await svgPng(mapSVG(rows, { bw: mw, bh: mh, numbers: false }), mw, mh), mx, my, mw, mh);
+  await d.image(await mapaPng(rows, { bw: mw, bh: mh, numbers: false }), mx, my, mw, mh);
   d.text(
     'Rotas de todas as equipes em todos os meses · cor = equipe · verde = concluída · tracejado = saída de ' + RP_BASE,
     mx,
@@ -736,7 +806,7 @@ async function monthSection(d, c, m, alone) {
   const my = 114,
     mw = 430,
     mh = d.BOT - my - 14;
-  await d.image(await svgPng(mapSVG(mr, { bw: mw, bh: mh, numbers: true }), mw, mh), M, my, mw, mh);
+  await d.image(await mapaPng(mr, { bw: mw, bh: mh, numbers: true }), M, my, mw, mh);
   d.text('Número = ordem de visita da equipe · cor = equipe · verde = concluída · tracejado = saída de ' + RP_BASE, M, my + mh + 10, {
     size: 6.8,
     color: PX.muted,
