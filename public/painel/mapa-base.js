@@ -2,7 +2,9 @@
 // O desenho (SVG) usa a projeção de Mercator, a mesma das imagens do OpenStreetMap: a camada de imagens acompanha
 // o enquadramento do SVG (viewBox) e os pontos caem no endereço real. Ao aproximar, os marcadores mantêm o tamanho na tela.
 (function () {
-  const URL_T = window.RP_TILES; // ex.: https://tile.openstreetmap.org/{z}/{x}/{y}.png ('' desliga)
+  let URL_T = window.RP_TILES; // ex.: /tiles/{z}/{x}/{y}.png ('' desliga)
+  // se as imagens pelo servidor falharem, o navegador busca direto no OpenStreetMap (com a origem como Referer)
+  const DIRETO = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
   const camada = document.getElementById('tiles');
   const wrap = svg.parentElement;
   const attr = document.getElementById('map-attr');
@@ -47,7 +49,15 @@
           img.alt = '';
           img.decoding = 'async';
           img.onload = () => { carregadas++; img.classList.add('ok'); };
-          img.onerror = () => { erros++; img.remove(); if (erros > 8 && !carregadas) desligar(); };
+          img._u = URL_T;
+          img.onerror = () => {
+            img.remove();
+            if (img._u !== URL_T) return; // erro de uma imagem da origem anterior
+            erros++;
+            if (erros >= 3 && !carregadas && URL_T !== DIRETO) { URL_T = DIRETO; erros = 0; camada.innerHTML = ''; window.rpMapaBase(); return; }
+            if (erros >= 3 && !carregadas) desligar();
+          };
+          if (URL_T === DIRETO) img.referrerPolicy = 'strict-origin-when-cross-origin';
           img.src = URL_T.replace('{z}', z).replace('{x}', tx).replace('{y}', ty).replace('{s}', 'abc'[(tx + ty) % 3]);
           camada.appendChild(img);
         }

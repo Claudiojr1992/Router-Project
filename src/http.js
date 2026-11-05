@@ -20,7 +20,12 @@ const MIME = {
 
 const config = require('./config');
 const contexto = require('./contexto');
-const origemTiles = (() => { try { return config.tileUrl ? ' ' + new URL(config.tileUrl.replace(/\{s\}/g, 'a')).origin.replace('//a.', '//*.') : ''; } catch (_) { return ''; } })();
+// origem das imagens do mapa + OpenStreetMap direto (reserva do painel quando as imagens pelo servidor falham)
+const origemTiles = (() => {
+  const OSM = 'https://tile.openstreetmap.org';
+  if (!config.tileUrl) return '';
+  try { const o = new URL(config.tileUrl.replace(/\{s\}/g, 'a')).origin.replace('//a.', '//*.'); return o === OSM ? ' ' + OSM : ` ${o} ${OSM}`; } catch (_) { return ' ' + OSM; }
+})();
 const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
