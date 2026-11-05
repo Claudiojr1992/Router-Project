@@ -578,3 +578,8 @@ a.pjedit{text-decoration:none}
 .evbtn{display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:4px 9px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent);font:inherit;font-size:.78rem;font-weight:600;cursor:pointer;max-width:100%}
 .evbtn:hover{background:var(--accent);color:var(--accent-ink)}
 .evbtn:disabled{opacity:.7;cursor:wait}
+
+.pjdel{width:30px;height:30px}.pjdel:hover{color:var(--err)!important;border-color:var(--err)!important}
+.btn.primary.danger{background:var(--err);border-color:var(--err);color:#fff}
+
+.pmacao .rtog{flex:none}

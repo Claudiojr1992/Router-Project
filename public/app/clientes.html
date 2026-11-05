@@ -122,7 +122,8 @@ async function abrir(id) {
   history.replaceState(null, '', '/app/clientes.html?id=' + id);
   Shell.projeto({ id: cli.id, nome: cli.nome, ativo: 'clientes' });
   S.sub.textContent = 'Cadastro e endereços: contratos, endereços, equipes e datas';
-  S.actions.innerHTML = '';
+  S.actions.innerHTML = Shell.pode('clientes', 'editar') && Shell.acao('excluir_projeto') ? '<button class="btn sm danger" id="xproj" title="Apaga o cliente, os contratos, endereços, atividades, fotos e medições">Excluir projeto</button>' : '';
+  RP.$('#xproj')?.addEventListener('click', () => Shell.excluirProjeto(cli.id, async () => { location.href = '/app/projetos.html'; }));
   if (!contratoSel || !cli.contratos.some((c) => c.id === contratoSel)) contratoSel = cli.contratos[0]?.id || null;
   await carregarContrato();
   render();

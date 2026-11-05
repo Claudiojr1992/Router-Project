@@ -232,6 +232,35 @@ module.exports = (app) => {
     return r;
   });
 
+  // ---------- Exclusão do projeto inteiro ----------
+  const RESUMO_EXCLUSAO = `SELECT cl.id, cl.nome,
+      (SELECT count(*)::int FROM contratos ct WHERE ct.cliente_id = cl.id) AS contratos,
+      (SELECT count(*)::int FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id WHERE ct.cliente_id = cl.id) AS enderecos,
+      (SELECT count(*)::int FROM tarefas t JOIN enderecos e ON e.id = t.endereco_id JOIN contratos ct ON ct.id = e.contrato_id WHERE ct.cliente_id = cl.id) AS tarefas,
+      (SELECT count(*)::int FROM evidencias ev JOIN tarefas t ON t.id = ev.tarefa_id JOIN enderecos e ON e.id = t.endereco_id JOIN contratos ct ON ct.id = e.contrato_id WHERE ct.cliente_id = cl.id) AS fotos,
+      (SELECT count(*)::int FROM medicoes m JOIN contratos ct ON ct.id = m.contrato_id WHERE ct.cliente_id = cl.id) AS medicoes,
+      (SELECT count(*)::int FROM medicoes m JOIN contratos ct ON ct.id = m.contrato_id WHERE ct.cliente_id = cl.id AND m.status IN ('nf_emitida','recebida')) AS faturadas,
+      (SELECT count(*)::int FROM ativos a JOIN contratos ct ON ct.id = a.contrato_id WHERE ct.cliente_id = cl.id) AS ativos
+    FROM clientes cl WHERE cl.id = $1`;
+  app.get('/api/clientes/:id/exclusao', leitura, async (req) => {
+    const r = await db.one(RESUMO_EXCLUSAO, [v.id(req.params.id)]);
+    if (!r) throw new HttpError(404, 'Projeto não encontrado');
+    return r;
+  });
+  // Apaga o cliente e tudo o que pende dele (contratos, endereços, atividades, fotos, ativos e medições). Exige digitar o nome.
+  app.post('/api/clientes/:id/excluir', escrita, async (req) => db.tx(async (c) => {
+    const id = v.id(req.params.id);
+    const r = (await c.query(RESUMO_EXCLUSAO, [id])).rows[0];
+    if (!r) throw new HttpError(404, 'Projeto não encontrado');
+    const norm = (x) => String(x || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    if (norm(req.body.confirmacao) !== norm(r.nome)) throw new HttpError(400, 'Digite o nome do projeto exatamente como aparece para confirmar');
+    if (r.faturadas && req.body.incluir_faturadas !== true) throw new HttpError(409, `Este projeto tem ${r.faturadas} medição(ões) com nota fiscal emitida ou recebida. Marque a opção para excluir mesmo assim.`);
+    await c.query(`DELETE FROM mensagens WHERE endereco_id IN (SELECT e.id FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id WHERE ct.cliente_id = $1)`, [id]);
+    await c.query(`DELETE FROM rota_config WHERE id ~ ('-c' || $1::text || '$')`, [id]);
+    await c.query(`DELETE FROM clientes WHERE id = $1`, [id]);
+    return { ok: true, excluido: r };
+  }));
+
   // ---------- Empresas (executora ou parceira do contrato) ----------
   const EMP = `em.id, em.nome, em.cnpj, em.contato, em.email, em.telefone, em.ativo, em.criado_em, (em.logo IS NOT NULL) AS tem_logo`;
   app.get('/api/empresas', leitura, async () => db.many(

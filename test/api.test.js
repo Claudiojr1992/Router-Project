@@ -181,6 +181,19 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     assert.equal((await admin.del('/api/relatorio-modelos/' + r.json.id)).status, 200);
   });
 
+  await t.test('excluir projeto: pede o nome, respeita a permissão e apaga tudo', async () => {
+    const c = (await admin.post('/api/clientes', { nome: 'Apagar ' + sufixo })).json;
+    const k = (await admin.post(`/api/clientes/${c.id}/contratos`, { numero: 'A-' + sufixo, tipo: 'principal' })).json;
+    await admin.post(`/api/contratos/${k.id}/enderecos`, { nome: 'Agência X', municipio: 'Fortaleza', uf: 'CE', cameras: 2 });
+    const r = (await admin.get(`/api/clientes/${c.id}/exclusao`)).json;
+    assert.equal(r.enderecos, 1); assert.ok(r.tarefas >= 1);
+    assert.equal((await admin.post(`/api/clientes/${c.id}/excluir`, { confirmacao: 'outro nome' })).status, 400);
+    await admin.put('/api/perfis/semexc_' + sufixo, { nome: 'Sem exclusão', permissoes: { clientes: 'editar' }, acoes: { excluir_projeto: false } });
+    assert.equal((await admin.post(`/api/clientes/${c.id}/excluir`, { confirmacao: 'Apagar ' + sufixo })).status, 200);
+    assert.equal((await admin.get(`/api/clientes/${c.id}/exclusao`)).status, 404);
+    assert.equal((await admin.get(`/api/contratos/${k.id}/enderecos`)).json.length, 0);
+  });
+
   await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
     const r = await admin.put('/api/enderecos/' + end.id, { nome: 'Agência Teste', logradouro: 'Rua Nova, 10', municipio: 'Fortaleza', uf: 'CE', cameras: 6 });
     assert.equal(r.status, 200);

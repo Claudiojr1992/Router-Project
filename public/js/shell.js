@@ -164,6 +164,31 @@ const Shell = (() => {
 
   // ---------- Abas de um projeto (Painel e rotas · Execução · Cadastro e endereços) ----------
   // Fica logo abaixo do título; o mesmo cliente nas três telas, sem voltar para a lista.
+// Exclusão do projeto inteiro: mostra o que será apagado e pede o nome digitado para confirmar
+  async function excluirProjeto(id, depois) {
+  let r;
+  try { r = await RP.api(`/clientes/${id}/exclusao`); } catch (e) { return RP.toast(e.message); }
+  const n = (x, um, varios) => `<b>${RP.fmtN(x)}</b> ${x === 1 ? um : varios}`;
+  RP.drawer('Excluir projeto', `
+    <div class="alert err" style="display:block;margin-top:0"><b>Esta ação não pode ser desfeita.</b> Some do sistema o projeto <b>${RP.esc(r.nome)}</b> e tudo o que pertence a ele.</div>
+    <ul style="margin:12px 0 16px;padding-left:20px;line-height:1.8">
+      <li>${n(r.contratos, 'contrato', 'contratos')} (com itens, preços e arquivos)</li><li>${n(r.enderecos, 'endereço', 'endereços')} e o plano do Painel de rotas</li>
+      <li>${n(r.tarefas, 'atividade', 'atividades')} com checklists e comentários</li><li>${n(r.fotos, 'foto de evidência', 'fotos de evidência')}</li>
+      <li>${n(r.ativos, 'ativo de patrimônio', 'ativos de patrimônio')}</li><li>${n(r.medicoes, 'medição', 'medições')}${r.faturadas ? ` (<b style="color:var(--err)">${r.faturadas} com nota fiscal</b>)` : ''}</li></ul>
+    ${r.fotos ? '<p class="muted" style="font-size:.88rem">Se precisar guardar as fotos, baixe antes as evidências em .zip na Execução do projeto.</p>' : ''}
+    ${r.faturadas ? '<label class="check"><input type="checkbox" id="xp-f"><span>Excluir mesmo com medições que já têm nota fiscal emitida ou recebida</span></label>' : ''}
+    <div class="field"><label for="xp-n">Para confirmar, digite o nome do projeto: <b>${RP.esc(r.nome)}</b></label><input class="input" id="xp-n" autocomplete="off" required></div>
+    <p class="muted" style="font-size:.85rem;margin:0">Fica registrado na auditoria quem excluiu e quando.</p>`, {
+    saveLabel: 'Excluir definitivamente',
+    onSave: async (el) => {
+      await RP.api(`/clientes/${id}/excluir`, { method: 'POST', body: { confirmacao: RP.$('#xp-n', el).value, incluir_faturadas: !!RP.$('#xp-f', el)?.checked } });
+      RP.toast(`Projeto ${r.nome} excluído`);
+      await depois();
+    },
+  });
+  const bt = document.querySelector('.drawer [data-save]'); if (bt) bt.classList.add('danger');
+}
+
   function projeto({ id, nome, ativo, extra = '' }) {
     const tabs = [
       ['rota', 'Painel e rotas', `/app/rota.html?c=${id}`, 'Plano por equipe, mapa, meta e PDF para o cliente'],
@@ -210,5 +235,5 @@ const Shell = (() => {
     });
   }
 
-  return { init, pode, acao, projeto, PERFIL, ESC, GES, TODOS, REABRE, aplicarTema, temaAtual };
+  return { init, pode, acao, projeto, excluirProjeto, PERFIL, ESC, GES, TODOS, REABRE, aplicarTema, temaAtual };
 })();

@@ -30,6 +30,7 @@ const ICO = {
   un: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/></svg>',
   ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>',
   at: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17.5v.5"/></svg>',
+  lixo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   ed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
 };
 let carteira = [], filtroL = 'todos', busca = '';
@@ -94,13 +95,14 @@ function cards() {
   const l = carteira.filter((p) => (filtroL === 'todos' || situacao(p) === filtroL) && (!lq || p.nome.toLowerCase().includes(lq)));
   const el = RP.$('#pj-grid');
   const editaMeta = Shell.pode('rota', 'editar');
+  const excluiProj = Shell.pode('clientes', 'editar') && Shell.acao('excluir_projeto');
   const novo = Shell.pode('clientes', 'editar') && filtroL === 'todos' && !lq ? '<a class="pjnovo" href="/app/clientes.html?novo=1"><b>+</b>Novo projeto<small class="muted" style="font-weight:400">Cliente, contrato e itens num formulário só</small></a>' : '';
   if (!l.length) { el.innerHTML = novo || '<div class="card empty" style="grid-column:1/-1">Nenhum projeto neste filtro.</div>'; return; }
   el.innerHTML = l.map((p) => {
     const st = situacao(p), m = metaDe(p), falta = Math.max(0, m - p.concluidos), pc = pctP(p);
     const extra = [p.contratos.length > 1 ? `<span>${p.contratos.length} contratos</span>` : '', p.sem_responsavel ? `<span class="warn">${RP.fmtN(p.sem_responsavel)} sem responsável</span>` : '', p.fora_rota ? `<span>${p.fora_rota} fora da rota</span>` : ''].join('');
     return `<article class="pjcard" data-href="${destino(p)}" tabindex="0" role="link" aria-label="Abrir projeto ${RP.esc(p.nome)}">
-      <div class="pjtop"><span class="pjbadge" style="--c:${SIT[st][1]}"><i></i>${SIT[st][0]}</span></div>
+      <div class="pjtop"><span class="pjbadge" style="--c:${SIT[st][1]}"><i></i>${SIT[st][0]}</span>${excluiProj ? `<button type="button" class="pjedit pjdel" data-del="${p.id}" title="Excluir o projeto" aria-label="Excluir o projeto ${RP.esc(p.nome)}">${ICO.lixo}</button>` : ''}</div>
       <h3>${RP.esc(p.nome)}</h3>
       <p class="pjdate">Criado em ${RP.fmtData(p.criado_em)}${p.fim_previsto ? ` · término previsto ${RP.fmtData(p.fim_previsto)}` : ''}</p>
       ${extra ? `<div class="pjextra">${extra}</div>` : ''}
@@ -122,7 +124,10 @@ function cards() {
     c.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); location.href = c.dataset.href; } };
   });
   RP.$$('[data-meta]', el).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); editarMeta(carteira.find((p) => p.id === +b.dataset.meta)); }));
+  RP.$$('[data-del]', el).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); Shell.excluirProjeto(+b.dataset.del, async () => { location.reload(); }); }));
 }
+
+
 
 function editarMeta(p) {
   RP.drawer(`Meta de instalações · ${p.nome}`, `

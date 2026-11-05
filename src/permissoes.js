@@ -25,6 +25,7 @@ const MODULOS = [
 const ACOES = [
   { id: 'reabrir', nome: 'Reabrir atividade concluída' },
   { id: 'excluir', nome: 'Excluir endereços, arquivos e registros' },
+  { id: 'excluir_projeto', nome: 'Excluir projeto inteiro (cliente, contratos, endereços, atividades, fotos e medições)' },
   { id: 'delegar', nome: 'Trocar o responsável de uma atividade' },
   { id: 'incluir_extra', nome: 'Incluir atividade extra num endereço (ex.: escavação, poste)' },
   { id: 'distribuir', nome: 'Distribuir atividades em lote e criar regras' },
@@ -93,6 +94,8 @@ const ROTAS = [
   ['*', P('/api/checklists(/.*)?'), 'checklists'],
   ['GET', P('/api/empresas'), { any: ['empresas:ver', 'clientes:ver', 'faturamento:ver'] }],
   ['*', P('/api/empresas(/.*)?'), 'empresas'],
+  ['GET', P('/api/clientes/[^/]+/exclusao'), 'clientes:ver'],
+  ['POST', P('/api/clientes/[^/]+/excluir'), ['clientes:editar', { acao: 'excluir_projeto' }]],
   ['*', P('/api/clientes/[^/]+/distribuir(/.*)?'), { any: ['clientes:editar', 'rota:editar'] }],
   ['GET', P('/api/clientes(/.*)?'), { any: ['clientes:ver', 'rota:ver', 'projetos:ver'] }],
   ['*', P('/api/(clientes|contratos|enderecos|arquivos)(/.*)?'), 'clientes'],
