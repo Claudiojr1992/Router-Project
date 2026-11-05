@@ -588,3 +588,10 @@ a.pjedit{text-decoration:none}
 .fotow{position:relative}
 .fdel{position:absolute;top:-7px;right:-7px;width:26px;height:26px;border-radius:50%;border:2px solid var(--panel);background:var(--err);color:#fff;display:grid;place-items:center;padding:0;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.25)}
 .fdel:hover{filter:brightness(1.1)}
+
+/* Percentual de conclusão pelas atividades */
+.avc{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-size:.82rem}
+.avc b{color:var(--c);font-weight:700;min-width:34px;text-align:right}
+.avc small{color:var(--muted)}
+.avb{display:inline-block;height:6px;border-radius:999px;background:var(--line);overflow:hidden}
+.avb i{display:block;height:100%;background:var(--c);border-radius:999px}

@@ -3,7 +3,7 @@
 // e as fotos ficam guardadas até a conexão voltar. A sincronização envia fotos primeiro, depois as ações.
 (() => {
   'use strict';
-  const VERSAO = '1.4.0';
+  const VERSAO = '1.5.0';
   const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -85,6 +85,7 @@
 
   // Aplica as mudanças ainda não enviadas por cima do pacote vindo do servidor
   function aplicarPendentes(bundle) {
+    for (const t of bundle.tarefas || []) if (t._st_srv === undefined) t._st_srv = t.status;
     for (const a of fila) aplicarLocal(bundle, a);
     for (const f of fotosPend) {
       const l = (bundle.fotos[f.tarefa_id] = bundle.fotos[f.tarefa_id] || []);
@@ -239,6 +240,20 @@
     return { total: ck.itens.length, feitos: ck.itens.filter(feito).length, faltam: obr.filter((i) => !feito(i)) };
   }
 
+  // Percentual de conclusão do endereço pelas atividades (de todos, não só as do técnico); conta o que ainda está na fila
+  function avancoEnd(e) {
+    let total = e.end_atv_total || 0, feitas = e.end_atv_concluidas || 0;
+    if (!total) return null;
+    for (const t of B.tarefas.filter((x) => x.endereco_id === e.endereco_id)) {
+      const srv = t._st_srv ?? t.status; // status que veio do servidor
+      if (t.status === 'concluida' && srv !== 'concluida') feitas++;
+      if (t.status !== 'concluida' && srv === 'concluida') feitas--;
+    }
+    feitas = Math.max(0, Math.min(total, feitas));
+    return { total, feitas, pc: Math.round((feitas / total) * 100) };
+  }
+  const barraAvanco = (a) => a ? `<div class="avm"><div class="bar"><i style="width:${a.pc}%"></i></div><span><b>${a.pc}%</b> · ${a.feitas} de ${a.total} atividades</span></div>` : '';
+
   function telaHoje() {
     const ts = B.tarefas;
     const abertas = ts.filter((t) => t.status !== 'concluida');
@@ -260,7 +275,7 @@
         ${erros.length ? `<a class="errbox" href="#/sync" style="text-decoration:none;color:inherit">${erros.length} item(ns) não foram aceitos pelo servidor. Toque para revisar.</a>` : ''}
         ${!B.usuario.pessoa_id ? '<div class="warnbox">Seu usuário ainda não está ligado a um técnico. Peça ao administrador.</div>' : ''}
         ${grupos.size ? [...grupos.values()].map((g) => { const e = g[0]; return `<a class="card end" href="#/e/${e.endereco_id}">
-            <h2>${esc(e.endereco)}</h2><div class="meta">${esc(e.municipio)}/${esc(e.uf)} · ${e.cameras} câmeras · ${esc(e.cliente)}</div>
+            <h2>${esc(e.endereco)}</h2><div class="meta">${esc(e.municipio)}/${esc(e.uf)} · ${e.cameras} câmeras · ${esc(e.cliente)}</div>${barraAvanco(avancoEnd(e))}
             <div class="acts">${g.map((t) => `<div class="act"><span class="n">${esc(t.atividade)}</span><span class="pill ${t.status}"><i></i>${ST[t.status]}</span></div>`).join('')}</div></a>`; }).join('')
           : `<div class="empty">${filtro === 'abertas' ? 'Nenhuma atividade com você agora.<br>Puxe novidades em Sincronizar.' : 'Nada concluído nos últimos 7 dias.'}</div>`}`,
     });
@@ -283,6 +298,7 @@
           <dt>Câmeras</dt><dd>${e.cameras}</dd>
           ${(e.equipamentos || []).length ? `<dt>Equipamentos</dt><dd>${e.equipamentos.map((q) => `${esc(q.nome)}: <b>${q.quantidade}</b>`).join('<br>')}</dd>` : ''}
           <dt>Situação</dt><dd>${esc(e.endereco_status)}</dd>
+          ${avancoEnd(e) ? `<dt>Conclusão</dt><dd>${barraAvanco(avancoEnd(e))}</dd>` : ''}
           ${e.aeroporto ? `<dt>Aeroporto</dt><dd>${esc(e.aeroporto)}${e.km_aeroporto ? ` · ${e.km_aeroporto} km` : ''}</dd>` : ''}
         </dl><a class="btn block" style="margin-top:12px" href="${mapa}" target="_blank" rel="noopener">Abrir no mapa</a></div>
         <div class="sec">Suas atividades aqui</div>

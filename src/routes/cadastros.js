@@ -362,7 +362,9 @@ module.exports = (app) => {
     `SELECT e.*, COALESCE((SELECT json_agg(json_build_object('item_id', ci.id, 'nome', ci.nome, 'quantidade', ei.quantidade) ORDER BY ci.ordem, ci.id)
                              FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id WHERE ei.endereco_id = e.id), '[]') AS itens
               , et.nome AS etapa, et.data_inicio AS etapa_inicio, ${VALOR}::float AS valor,
-              (SELECT count(*)::int FROM ativos a WHERE a.endereco_id = e.id AND a.status = 'instalado') AS ativos
+              (SELECT count(*)::int FROM ativos a WHERE a.endereco_id = e.id AND a.status = 'instalado') AS ativos,
+              (SELECT count(*)::int FROM tarefas t JOIN atividades at ON at.id = t.atividade_id AND at.ativo WHERE t.endereco_id = e.id) AS atv_total,
+              (SELECT count(*)::int FROM tarefas t JOIN atividades at ON at.id = t.atividade_id AND at.ativo WHERE t.endereco_id = e.id AND t.status = 'concluida') AS atv_concluidas
        FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id LEFT JOIN etapas et ON et.id = e.etapa_id WHERE e.contrato_id = $1 ORDER BY e.uf, e.municipio, e.nome`, [v.id(req.params.id)]));
 
   // Etapas do cliente (cada uma com data de início; os endereços ligados a ela são atacados naquele mês)

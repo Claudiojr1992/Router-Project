@@ -52,6 +52,9 @@ async function carregar(tarefaId) {
     db.many(`SELECT hostname, ip, tipo, status, enviado_em FROM monitoramento_ativos WHERE endereco_id = $1 ORDER BY hostname`, [t.endereco_id]).catch(() => []),
   ]);
   t.equipamentos = equip; t.ativos = ativos; t.monitoramento = mon;
+  const av = await db.one(`SELECT count(*)::int AS total, count(*) FILTER (WHERE t.status = 'concluida')::int AS feitas
+                             FROM tarefas t JOIN atividades a ON a.id = t.atividade_id AND a.ativo WHERE t.endereco_id = $1`, [t.endereco_id]);
+  t.avanco = av && av.total ? `${av.feitas} de ${av.total} atividades (${Math.round((av.feitas / av.total) * 100)}%)` : '—';
   const [itens, fotos, eventos] = await Promise.all([
     t.checklist_id ? db.many(
       `SELECT i.id, i.ordem, i.texto, i.tipo_resposta, i.obrigatorio, r.valor, r.ok, r.criado_em, u.nome AS usuario,
@@ -109,7 +112,7 @@ const MODELO_PADRAO = {
   termo: TEXTO_TERMO,
 };
 const VARIAVEIS = ['cliente', 'contrato', 'empresa', 'atividade', 'endereco', 'codigo', 'municipio', 'uf', 'logradouro', 'responsavel', 'analista', 'elaborador', 'status',
-  'inicio', 'conclusao', 'duracao', 'previsto', 'execucao', 'cameras', 'equipamentos', 'data'];
+  'inicio', 'conclusao', 'duracao', 'previsto', 'execucao', 'avanco', 'cameras', 'equipamentos', 'data'];
 
 const HEX = /^#[0-9a-f]{6}$/i;
 const txt = (v, max) => (v == null ? '' : String(v).slice(0, max));
@@ -197,7 +200,7 @@ async function desenhar(dados) {
     status: ST[t.status] || t.status, inicio: dataHora(t.realizada_inicio), conclusao: dataHora(t.realizada_fim), duracao: duracao(t.realizada_inicio, t.realizada_fim),
     previsto: t.prevista_inicio || t.prevista_fim ? `${data(t.prevista_inicio)} a ${data(t.prevista_fim)}` : '—', cameras: String(t.cameras ?? '—'),
     equipamentos: (t.equipamentos || []).map((e) => `${e.nome}: ${e.quantidade}`).join(', ') || '—', data: data(new Date().toISOString()),
-    execucao: execucao ? data(execucao) : '—',
+    execucao: execucao ? data(execucao) : '—', avanco: t.avanco || '—',
   };
   const resolve = (s) => String(s || '').replace(/\{(\w+)\}/g, (m0, k) => (k in vars ? vars[k] : m0));
   const pdf = await PDFDocument.create();

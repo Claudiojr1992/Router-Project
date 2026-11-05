@@ -97,5 +97,12 @@ const RP = (() => {
       <div style="font-size:.78rem;margin-top:6px"><span class="req">*</span> obrigatório</div>`;
   }
 
-  return { checklistHtml, api, esc, $, $$, fmtN, fmtData, fmtDataHora, iniciais, toast, showAlert, busy, drawer, logo, LOGO_SVG };
+  // Percentual de conclusão pelas atividades do endereço (barra + "57% · 4/7")
+  const avanco = (feitas, total, { largura = 70 } = {}) => {
+    if (!total) return '<span class="muted" style="font-size:.82rem">sem atividades</span>';
+    const pc = Math.round((feitas / total) * 100);
+    const cor = pc >= 100 ? 'var(--ok)' : pc >= 50 ? 'var(--info)' : pc > 0 ? 'var(--warn)' : 'var(--muted)';
+    return `<span class="avc" title="${feitas} de ${total} atividades concluídas" style="--c:${cor}"><span class="avb" style="width:${largura}px"><i style="width:${pc}%"></i></span><b>${pc}%</b><small>${feitas}/${total}</small></span>`;
+  };
+  return { avanco, checklistHtml, api, esc, $, $$, fmtN, fmtData, fmtDataHora, iniciais, toast, showAlert, busy, drawer, logo, LOGO_SVG };
 })();

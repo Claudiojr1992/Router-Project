@@ -243,7 +243,11 @@ module.exports = (app) => {
             (SELECT COALESCE(json_agg(json_build_object('id', x.id, 'numero', x.numero, 'tipo', x.tipo) ORDER BY x.tipo DESC, x.id), '[]')
                FROM contratos x WHERE x.cliente_id = c.id AND x.status <> 'encerrado') AS contratos,
             (SELECT count(*)::int FROM tarefas t JOIN enderecos e2 ON e2.id = t.endereco_id JOIN contratos x ON x.id = e2.contrato_id
-              WHERE x.cliente_id = c.id AND x.status <> 'encerrado' AND t.responsavel_id IS NULL AND t.status <> 'concluida') AS sem_responsavel
+              WHERE x.cliente_id = c.id AND x.status <> 'encerrado' AND t.responsavel_id IS NULL AND t.status <> 'concluida') AS sem_responsavel,
+            (SELECT count(*)::int FROM tarefas t JOIN atividades at ON at.id = t.atividade_id AND at.ativo JOIN enderecos e2 ON e2.id = t.endereco_id JOIN contratos x ON x.id = e2.contrato_id
+              WHERE x.cliente_id = c.id AND x.status <> 'encerrado' AND e2.na_rota) AS atividades_total,
+            (SELECT count(*)::int FROM tarefas t JOIN atividades at ON at.id = t.atividade_id AND at.ativo JOIN enderecos e2 ON e2.id = t.endereco_id JOIN contratos x ON x.id = e2.contrato_id
+              WHERE x.cliente_id = c.id AND x.status <> 'encerrado' AND e2.na_rota AND t.status = 'concluida') AS atividades_concluidas
        FROM clientes c
        LEFT JOIN contratos ct ON ct.cliente_id = c.id AND ct.status <> 'encerrado'
        LEFT JOIN enderecos e ON e.contrato_id = ct.id

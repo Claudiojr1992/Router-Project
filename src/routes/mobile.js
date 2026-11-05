@@ -132,6 +132,8 @@ module.exports = (app) => {
               e.id AS endereco_id, e.codigo, e.nome AS endereco, e.logradouro, e.bairro, e.cep, e.municipio, e.uf, e.lat, e.lon,
               e.cameras, e.status AS endereco_status, e.aeroporto, e.km_aeroporto,
               cl.nome AS cliente, ct.numero AS contrato,
+              (SELECT count(*)::int FROM tarefas x JOIN atividades xa ON xa.id = x.atividade_id AND xa.ativo WHERE x.endereco_id = e.id) AS end_atv_total,
+              (SELECT count(*)::int FROM tarefas x JOIN atividades xa ON xa.id = x.atividade_id AND xa.ativo WHERE x.endereco_id = e.id AND x.status = 'concluida') AS end_atv_concluidas,
               COALESCE((SELECT json_agg(json_build_object('nome', ci.nome, 'quantidade', ei.quantidade) ORDER BY ci.ordem, ci.id)
                           FROM endereco_itens ei JOIN contrato_itens ci ON ci.id = ei.item_id WHERE ei.endereco_id = e.id AND ei.quantidade > 0), '[]') AS equipamentos
          FROM tarefas t
