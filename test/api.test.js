@@ -194,6 +194,20 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     assert.equal((await admin.get(`/api/contratos/${k.id}/enderecos`)).json.length, 0);
   });
 
+  await t.test('foto de evidência: exclusão pela tela e pela fila do app', async () => {
+    const tarefa = (await admin.get('/api/projetos/' + ct)).json.enderecos.flatMap((x) => x.tarefas)[0];
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const up = async () => (await admin.post('/api/mobile/fotos', { client_id: require('crypto').randomUUID(), tarefa_id: tarefa.id, mime: 'image/png', base64: png })).json;
+    const f1 = await up(), f2 = await up();
+    assert.ok(f1.id && f2.id, JSON.stringify(f1));
+    assert.equal((await admin.del('/api/fotos/' + f1.id)).status, 200);
+    const r = (await admin.post('/api/mobile/acoes', { acoes: [{ id: require('crypto').randomUUID(), tipo: 'excluir_foto', tarefa_id: tarefa.id, foto_id: f2.id }] })).json;
+    assert.equal(r.resultados[0].ok, true, JSON.stringify(r));
+    const fs = (await admin.get(`/api/tarefas/${tarefa.id}/fotos`)).json;
+    assert.ok(!fs.some((x) => x.id === f1.id || x.id === f2.id));
+    assert.ok((await admin.get(`/api/tarefas/${tarefa.id}/eventos`)).json.some((e) => /Foto excluída/.test(e.detalhe)));
+  });
+
   await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
     const r = await admin.put('/api/enderecos/' + end.id, { nome: 'Agência Teste', logradouro: 'Rua Nova, 10', municipio: 'Fortaleza', uf: 'CE', cameras: 6 });
     assert.equal(r.status, 200);

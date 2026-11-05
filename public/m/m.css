@@ -125,3 +125,6 @@ textarea.in{min-height:80px;resize:vertical}
 .patl span,.patl small{color:var(--muted)}
 
 .xtag{display:inline-block;font-size:.66rem;font-weight:700;padding:1px 6px;border-radius:999px;background:color-mix(in srgb,var(--accent,#0E6E63) 14%,transparent);color:var(--accent,#0E6E63);text-transform:uppercase;vertical-align:middle}
+
+.thumbw .tdel{position:absolute;top:-6px;right:-6px;width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:var(--err,#C2413A);color:#fff;display:grid;place-items:center;padding:0;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.thumbw .tdel svg{width:13px;height:13px}

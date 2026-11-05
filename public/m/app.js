@@ -3,7 +3,7 @@
 // e as fotos ficam guardadas até a conexão voltar. A sincronização envia fotos primeiro, depois as ações.
 (() => {
   'use strict';
-  const VERSAO = '1.3.0';
+  const VERSAO = '1.4.0';
   const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -22,6 +22,7 @@
     hoje: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>',
     sync: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.5 6.2M3 12a9 9 0 0 1 15.5-6.2"/><path d="M21 3v6h-6M3 21v-6h6"/></svg>',
     conta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+    lixo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
     cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>',
   };
 
@@ -99,6 +100,7 @@
       if ((a.status === 'em_andamento' || a.status === 'concluida') && !t.realizada_inicio) t.realizada_inicio = a.em;
       t.realizada_fim = a.status === 'concluida' ? a.em : null;
     }
+    if (a.tipo === 'excluir_foto') { bundle.fotos[a.tarefa_id] = (bundle.fotos[a.tarefa_id] || []).filter((x) => x.id !== a.foto_id); }
     if (a.tipo === 'resposta') { (bundle.respostas[a.tarefa_id] = bundle.respostas[a.tarefa_id] || {})[a.item_id] = { valor: a.valor, ok: a.ok }; }
     if (a.tipo === 'ativo') {
       const p = ((bundle.patrimonio = bundle.patrimonio || {})[t.endereco_id] = (bundle.patrimonio || {})[t.endereco_id] || { itens: [], ativos: [] });
@@ -347,7 +349,9 @@
     }
     return f.id ? `/api/fotos/${f.id}` : '';
   }
-  const thumbs = (lista) => lista.map((f) => `<div class="thumbw"><img class="thumb" alt="Foto${f.legenda ? ': ' + esc(f.legenda) : ''}" data-cid="${esc(f.client_id || '')}" data-fid="${f.id || ''}" src="${esc(fotoSrc(f))}" loading="lazy">${f.local ? '<span class="q">na fila</span>' : ''}</div>`).join('');
+  // quem pode apagar: foto ainda no aparelho; ou quem tirou, com a atividade aberta; ou quem pode excluir registros
+  const podeApagar = (t, f) => f.local || (B.usuario.perfil === 'admin' || (B.usuario.acoes && B.usuario.acoes.excluir)) || (String(f.usuario_id) === String(B.usuario.id) && t.status !== 'concluida');
+  const thumbs = (lista, t) => lista.map((f) => `<div class="thumbw"><img class="thumb" alt="Foto${f.legenda ? ': ' + esc(f.legenda) : ''}" data-cid="${esc(f.client_id || '')}" data-fid="${f.id || ''}" src="${esc(fotoSrc(f))}" loading="lazy">${f.local ? '<span class="q">na fila</span>' : ''}${t && podeApagar(t, f) ? `<button type="button" class="tdel" data-apaga="${esc(f.client_id || '')}|${f.id || ''}" aria-label="Excluir esta foto">${ICON.lixo}</button>` : ''}</div>`).join('');
   const botaoCam = (item) => `<label class="cam" aria-label="Tirar foto">${ICON.cam}<input type="file" accept="image/*" capture="environment" hidden data-foto="${item || ''}"></label>`;
 
   function telaTarefa(id) {
@@ -373,14 +377,14 @@
           <div class="card ck">${ck.itens.map((i) => {
             const r = resp[i.id] || {}; const fi = fotos.filter((f) => f.item_id === i.id);
             const obr = i.obrigatorio ? '<span class="req" aria-label="obrigatório">*</span><small class="reqt">Obrigatório</small>' : '<small>Opcional</small>';
-            if (i.tipo_resposta === 'foto') return `<div class="it" data-it="${i.id}"><div class="tx">${esc(i.texto)}${obr}<div class="thumbs">${thumbs(fi)}${botaoCam(i.id)}</div></div></div>`;
+            if (i.tipo_resposta === 'foto') return `<div class="it" data-it="${i.id}"><div class="tx">${esc(i.texto)}${obr}<div class="thumbs">${thumbs(fi, t)}${botaoCam(i.id)}</div></div></div>`;
             if (i.tipo_resposta === 'texto' || i.tipo_resposta === 'numero') return `<div class="it" data-it="${i.id}"><div class="tx">${esc(i.texto)}${obr}
               <input class="in" data-item="${i.id}" ${i.tipo_resposta === 'numero' ? 'inputmode="decimal"' : ''} value="${esc(r.valor || '')}" placeholder="${i.tipo_resposta === 'numero' ? 'Número' : 'Escreva aqui'}" aria-label="${esc(i.texto)}"></div></div>`;
             return `<div class="it" data-it="${i.id}"><button class="box" role="checkbox" aria-checked="${!!r.ok}" data-check="${i.id}" aria-label="${esc(i.texto)}"></button><div class="tx">${esc(i.texto)}${obr}</div></div>`;
           }).join('')}</div>` : ''}
         ${secPatrimonio(t)}
         <div class="sec">Fotos da atividade (${fotos.filter((f) => !f.item_id).length})</div>
-        <div class="card pad"><div class="thumbs" style="margin-top:0">${thumbs(fotos.filter((f) => !f.item_id))}${botaoCam('')}</div>
+        <div class="card pad"><div class="thumbs" style="margin-top:0">${thumbs(fotos.filter((f) => !f.item_id), t)}${botaoCam('')}</div>
           <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:.88rem;color:var(--muted)"><input type="checkbox" id="gps" ${meta.gps !== false ? 'checked' : ''}> Guardar a localização nas fotos</label>
           <label style="display:flex;gap:8px;align-items:center;margin-top:6px;font-size:.88rem;color:var(--muted)"><input type="checkbox" id="carimbo" ${meta.carimbo !== false ? 'checked' : ''}> Carimbar data, hora, endereço e mapa na foto</label></div>
         <div class="sec">Comentário</div>
@@ -415,6 +419,7 @@
     $$('[data-foto]').forEach((inp) => (inp.onchange = () => novaFoto(t, inp.dataset.foto ? +inp.dataset.foto : null, inp.files[0])));
     ligarPatrimonio(t, () => telaTarefa(id));
     $$('img.thumb').forEach((im) => (im.onclick = () => verFoto(im)));
+    $$('[data-apaga]').forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); const [cid, fid] = b.dataset.apaga.split('|'); apagarFoto(t, cid, fid ? +fid : null, () => telaTarefa(id)); }));
     $('#gps').onchange = async (e) => { meta.gps = e.target.checked; await salvarMeta(); };
     $('#carimbo').onchange = async (e) => { meta.carimbo = e.target.checked; await salvarMeta(); };
     $('#relPdf').onclick = (e) => {
@@ -471,6 +476,26 @@
       } catch (_) { toast('Este aparelho não lê código pela câmera. Digite o número.'); }
       inp.value = '';
     }));
+  }
+
+  // Apaga a foto: se ainda está no aparelho, sai da fila; se já foi enviada, a exclusão vai para a fila (funciona sem internet)
+  async function apagarFoto(t, cid, fid, redesenhar) {
+    if (!confirm('Excluir esta foto? Ela sai da atividade e do relatório.')) return;
+    const pend = fotosPend.find((x) => x.client_id === cid && cid);
+    const lista = B.fotos[t.id] || [];
+    const f = lista.find((x) => (fid && x.id === fid) || (cid && x.client_id === cid));
+    if (pend && !(f && f.id)) {
+      fotosPend = fotosPend.filter((x) => x.client_id !== cid);
+      await idb.del('fotos', cid);
+      if (urls.has(cid)) { URL.revokeObjectURL(urls.get(cid)); urls.delete(cid); }
+      B.fotos[t.id] = lista.filter((x) => x.client_id !== cid);
+      await salvarBundle();
+      toast('Foto excluída');
+    } else if (f && f.id) {
+      await enfileirar({ tipo: 'excluir_foto', tarefa_id: t.id, foto_id: f.id });
+      toast(navigator.onLine ? 'Foto excluída' : 'Exclusão guardada para enviar');
+    }
+    redesenhar();
   }
 
   function verFoto(im) {
@@ -599,7 +624,7 @@
       await idb.put('fotos', { ...m, blob });
       fotosPend.push(m);
       urls.set(m.client_id, URL.createObjectURL(blob));
-      (B.fotos[t.id] = B.fotos[t.id] || []).push({ client_id: m.client_id, item_id: itemId, legenda: m.legenda, criado_em: new Date().toISOString(), local: true });
+      (B.fotos[t.id] = B.fotos[t.id] || []).push({ client_id: m.client_id, item_id: itemId, legenda: m.legenda, criado_em: new Date().toISOString(), local: true, usuario_id: B.usuario.id });
       await salvarBundle();
       toast(navigator.onLine ? 'Foto guardada, enviando…' : 'Foto guardada no aparelho');
       telaTarefa(t.id);
@@ -610,7 +635,7 @@
   }
 
   function nomeTarefa(id) { if (!id) return ''; const t = B && B.tarefas.find((x) => x.id === id); return t ? `${t.atividade} · ${t.endereco}` : `Atividade ${id}`; }
-  const ROT = { extra: (a) => `Atividade extra: ${a.nome || ''} (${String(a.quantidade || 1).replace('.', ',')})`, status: (a) => `Status → ${ST[a.status]}`, resposta: (a) => `Checklist: ${a.ok ? 'item marcado' : 'item desmarcado'}`, comentario: () => 'Comentário', foto: () => 'Foto', ativo: (a) => `Patrimônio ${a.patrimonio || a.numero_serie}` };
+  const ROT = { excluir_foto: () => 'Excluir foto', extra: (a) => `Atividade extra: ${a.nome || ''} (${String(a.quantidade || 1).replace('.', ',')})`, status: (a) => `Status → ${ST[a.status]}`, resposta: (a) => `Checklist: ${a.ok ? 'item marcado' : 'item desmarcado'}`, comentario: () => 'Comentário', foto: () => 'Foto', ativo: (a) => `Patrimônio ${a.patrimonio || a.numero_serie}` };
 
   function telaSync() {
     layout({

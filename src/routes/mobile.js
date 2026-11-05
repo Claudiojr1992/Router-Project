@@ -40,7 +40,22 @@ async function pendenciasChecklist(c, tarefa) {
   return r.rows.map((x) => x.texto);
 }
 
+// Exclui uma foto de evidência: quem pode excluir registros, ou quem tirou a foto enquanto a atividade não foi concluída
+async function excluirFoto(c, user, fotoId) {
+  const f = (await c.query(`SELECT ev.id, ev.tarefa_id, ev.usuario_id, ev.legenda, i.texto AS item, t.status
+                              FROM evidencias ev JOIN tarefas t ON t.id = ev.tarefa_id LEFT JOIN checklist_itens i ON i.id = ev.item_id WHERE ev.id = $1`, [fotoId])).rows[0];
+  if (!f) return { ok: true, ja: true }; // já tinha sido excluída
+  await tarefaDoUsuario(c, user, f.tarefa_id);
+  if (!podeAcao(user, 'excluir') && !(String(f.usuario_id) === String(user.id) && f.status !== 'concluida')) {
+    throw new HttpError(403, f.status === 'concluida' ? 'A atividade já foi concluída: só quem pode excluir registros apaga a foto' : 'Só quem tirou a foto (ou quem pode excluir registros) pode apagá-la');
+  }
+  await c.query(`DELETE FROM evidencias WHERE id = $1`, [f.id]);
+  await c.query(`INSERT INTO tarefa_eventos (tarefa_id, usuario_id, tipo, detalhe) VALUES ($1,$2,'comentario',$3)`, [f.tarefa_id, user.id, `Foto excluída${f.item || f.legenda ? ': ' + (f.item || f.legenda) : ''}`]);
+  return { ok: true };
+}
+
 async function aplicarAcao(c, user, a) {
+  if (a.tipo === 'excluir_foto') { await excluirFoto(c, user, v.id(a.foto_id, 'Foto')); return; }
   // atividade extra incluída no campo (ex.: escavação, poste): nasce com o técnico como responsável
   if (a.tipo === 'extra') {
     await criarExtra(c, user, { endereco_id: a.endereco_id, atividade_id: a.atividade_id, quantidade: a.quantidade, motivo: a.motivo, em: a.em });
@@ -132,7 +147,7 @@ module.exports = (app) => {
       ckIds.length ? db.many(`SELECT id, nome FROM checklists WHERE id = ANY($1)`, [ckIds]) : [],
       ckIds.length ? db.many(`SELECT id, checklist_id, ordem, texto, tipo_resposta, obrigatorio FROM checklist_itens WHERE checklist_id = ANY($1) ORDER BY ordem, id`, [ckIds]) : [],
       ids.length ? db.many(`SELECT tarefa_id, item_id, valor, ok FROM checklist_respostas WHERE tarefa_id = ANY($1)`, [ids]) : [],
-      ids.length ? db.many(`SELECT id, client_id, tarefa_id, item_id, legenda, criado_em FROM evidencias WHERE tarefa_id = ANY($1) ORDER BY criado_em`, [ids]) : [],
+      ids.length ? db.many(`SELECT id, client_id, tarefa_id, item_id, legenda, criado_em, usuario_id FROM evidencias WHERE tarefa_id = ANY($1) ORDER BY criado_em`, [ids]) : [],
     ]);
     const checklists = {};
     for (const c of ckRows) checklists[c.id] = { id: c.id, nome: c.nome, itens: itens.filter((i) => i.checklist_id === c.id) };
@@ -237,7 +252,7 @@ module.exports = (app) => {
     const id = v.id(req.params.id);
     await db.tx((c) => tarefaDoUsuario(c, req.user, id));
     return db.many(
-      `SELECT ev.id, ev.item_id, ev.legenda, ev.lat, ev.lon, ev.tirada_em, ev.criado_em, ev.tamanho, u.nome AS usuario, i.texto AS item
+      `SELECT ev.id, ev.item_id, ev.legenda, ev.lat, ev.lon, ev.tirada_em, ev.criado_em, ev.tamanho, ev.usuario_id, u.nome AS usuario, i.texto AS item
          FROM evidencias ev LEFT JOIN usuarios u ON u.id = ev.usuario_id LEFT JOIN checklist_itens i ON i.id = ev.item_id
         WHERE ev.tarefa_id = $1 ORDER BY ev.criado_em`, [id]);
   });
@@ -270,6 +285,8 @@ module.exports = (app) => {
     });
     res.end(r.bytes);
   });
+
+  app.delete('/api/fotos/:id', interno, async (req) => db.tx((c) => excluirFoto(c, req.user, v.id(req.params.id))));
 
   app.get('/api/fotos/:id', interno, async (req, res) => {
     const f = await db.one(`SELECT tarefa_id, mime, conteudo FROM evidencias WHERE id = $1`, [v.id(req.params.id)]);

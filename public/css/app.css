@@ -583,3 +583,8 @@ a.pjedit{text-decoration:none}
 .btn.primary.danger{background:var(--err);border-color:var(--err);color:#fff}
 
 .pmacao .rtog{flex:none}
+
+/* Foto de evidência com botão de excluir (detalhe da atividade) */
+.fotow{position:relative}
+.fdel{position:absolute;top:-7px;right:-7px;width:26px;height:26px;border-radius:50%;border:2px solid var(--panel);background:var(--err);color:#fff;display:grid;place-items:center;padding:0;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.fdel:hover{filter:brightness(1.1)}
