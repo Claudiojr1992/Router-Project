@@ -13,7 +13,7 @@
 <body>
 <script>
 const TIPOS = { check: 'Marcar feito', foto: 'Foto', texto: 'Texto', numero: 'Número' };
-let S, lista = [];
+let S, lista = [], modelos = [];
 
 (async () => {
   S = await Shell.init({ key: 'checklists', title: 'Checklists', sub: 'Passos que o técnico confirma ao executar uma atividade', perfis: Shell.ESC });
@@ -22,15 +22,15 @@ let S, lista = [];
 })();
 
 async function carregar() {
-  lista = await RP.api('/checklists');
+  [lista, modelos] = await Promise.all([RP.api('/checklists'), RP.api('/relatorio-modelos').catch(() => [])]);
   const gestor = Shell.pode('checklists', 'editar');
   S.content.innerHTML = lista.length ? `<div class="grid2">${lista.map((c) => `<div class="card ccard" ${gestor ? `data-id="${c.id}" role="button" tabindex="0"` : ''}>
-    <h3>${RP.esc(c.nome)}</h3><div class="muted" style="font-size:.9rem">${c.itens.length} itens · relatório ${c.relatorio ? '<b style="color:var(--accent)">com modelo próprio</b>' : 'no modelo padrão'}</div>
-    ${gestor ? `<div class="row" style="gap:6px"><button class="btn sm" type="button" data-mod="${c.id}">Modelo do relatório</button></div>` : ''}
+    <h3>${RP.esc(c.nome)}</h3><div class="muted" style="font-size:.9rem">${c.itens.length} itens · relatório ${(() => { const md = modelos.find((x) => x.id === c.modelo_id) || modelos.find((x) => x.padrao); return md ? `no modelo <b style="color:var(--accent)">${RP.esc(md.nome)}</b>${c.modelo_id ? '' : ' (padrão)'}` : 'no modelo padrão'; })()}</div>
+    <div class="row" style="gap:6px"><a class="btn sm" href="/app/relatorios.html${c.modelo_id ? '?id=' + c.modelo_id : ''}" data-mod="${c.id}">Ajustar o relatório</a></div>
     <ol style="margin:0;padding-left:20px;display:grid;gap:4px">${c.itens.map((i) => `<li>${RP.esc(i.texto)}${i.obrigatorio ? '<span class="req" title="Obrigatório">*</span>' : ''} <span class="muted" style="font-size:.8rem">· ${TIPOS[i.tipo_resposta]}${i.obrigatorio ? '' : ' · opcional'}</span></li>`).join('')}</ol></div>`).join('')}</div>`
     : '<div class="card empty">Nenhum checklist ainda.</div>';
   RP.$$('[data-id]', S.content).forEach((b) => { b.onclick = (e) => { if (e.target.closest('[data-mod]')) return; editar(lista.find((c) => c.id === +b.dataset.id)); }; b.onkeydown = (e) => { if (e.key === 'Enter' && e.target === b) b.onclick(e); }; });
-  RP.$$('[data-mod]', S.content).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); modeloRelatorio(lista.find((c) => c.id === +b.dataset.mod)); }));
+  RP.$$('[data-mod]', S.content).forEach((b) => (b.onclick = (e) => e.stopPropagation()));
 }
 
 function linha(it = { texto: '', tipo_resposta: 'check', obrigatorio: true }) {

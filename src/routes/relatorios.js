@@ -5,7 +5,7 @@ const v = require('../validate');
 const config = require('../config');
 const { HttpError } = require('../http');
 const { requer, GESTAO, ESCRITORIO, INTERNOS } = require('../auth');
-const { gerarRelatorio, desenhar, normalizarModelo, MODELO_PADRAO, VARIAVEIS } = require('../relatorio');
+const { gerarRelatorio, carregar, desenhar, normalizarModelo, MODELO_PADRAO, VARIAVEIS, TIPOS } = require('../relatorio');
 const { criarZip, nomeArquivo } = require('../zip');
 
 const hash = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
@@ -134,9 +134,94 @@ module.exports = (app) => {
   const escritorio = requer(ESCRITORIO);
   const gestao = requer(GESTAO);
 
-  // ---------- Modelo do relatório (por checklist) ----------
+  // ---------- Modelos de relatório (tela Relatórios) ----------
+  const corpoModelo = (b) => {
+    let m;
+    try { m = normalizarModelo(b.modelo || {}); } catch (e) { throw new HttpError(400, e.message); }
+    return { nome: v.str(b.nome, 'o nome do modelo', { max: 120 }), descricao: v.str(b.descricao, 'a descrição', { max: 500, opcional: true }), modelo: m, padrao: b.padrao === true };
+  };
+  async function ligarChecklists(c, id, ids) {
+    if (!Array.isArray(ids)) return;
+    const lista = ids.map((x) => v.id(x, 'Checklist'));
+    await c.query(`UPDATE checklists SET modelo_id = NULL WHERE modelo_id = $1 AND NOT (id = ANY($2::bigint[]))`, [id, lista]);
+    if (lista.length) await c.query(`UPDATE checklists SET modelo_id = $1 WHERE id = ANY($2::bigint[])`, [id, lista]);
+  }
+  async function marcarPadrao(c, id, padrao) {
+    if (padrao) await c.query(`UPDATE relatorio_modelos SET padrao = false WHERE padrao AND id <> $1`, [id]);
+    await c.query(`UPDATE relatorio_modelos SET padrao = $1 WHERE id = $2`, [padrao, id]);
+  }
+
+  app.get('/api/relatorio-modelos', leitura, async () => db.many(
+    `SELECT rm.id, rm.nome, rm.descricao, rm.padrao, rm.atualizado_em,
+            COALESCE((SELECT json_agg(json_build_object('id', c.id, 'nome', c.nome) ORDER BY c.nome) FROM checklists c WHERE c.modelo_id = rm.id), '[]') AS checklists
+       FROM relatorio_modelos rm ORDER BY rm.padrao DESC, rm.nome`));
+
+  // Dados para montar a tela: modelo padrão, variáveis, tipos de seção, checklists (com os itens de foto) e atividades para a prévia
+  app.get('/api/relatorio-modelos/meta', leitura, async () => {
+    const [cks, itens, tarefas] = await Promise.all([
+      db.many(`SELECT id, nome, modelo_id FROM checklists ORDER BY nome`),
+      db.many(`SELECT checklist_id, texto, tipo_resposta FROM checklist_itens ORDER BY checklist_id, ordem, id`),
+      db.many(`SELECT t.id, a.nome AS atividade, e.nome AS endereco, e.municipio, e.uf, a.checklist_id,
+                      (SELECT count(*)::int FROM evidencias ev WHERE ev.tarefa_id = t.id) AS fotos
+                 FROM tarefas t JOIN atividades a ON a.id = t.atividade_id AND a.ativo JOIN enderecos e ON e.id = t.endereco_id
+                WHERE EXISTS (SELECT 1 FROM evidencias ev WHERE ev.tarefa_id = t.id) OR t.status = 'concluida'
+                ORDER BY (SELECT count(*) FROM evidencias ev WHERE ev.tarefa_id = t.id) DESC, t.atualizado_em DESC LIMIT 40`),
+    ]);
+    for (const c of cks) c.itens = itens.filter((i) => i.checklist_id === c.id).map((i) => ({ texto: i.texto, tipo: i.tipo_resposta }));
+    return { padrao: MODELO_PADRAO, variaveis: VARIAVEIS, tipos: TIPOS, checklists: cks, tarefas };
+  });
+
+  app.get('/api/relatorio-modelos/:id', leitura, async (req) => {
+    const r = await db.one(`SELECT id, nome, descricao, padrao, modelo, atualizado_em FROM relatorio_modelos WHERE id = $1`, [v.id(req.params.id)]);
+    if (!r) throw new HttpError(404, 'Modelo não encontrado');
+    r.modelo = normalizarModelo(typeof r.modelo === 'string' ? JSON.parse(r.modelo) : r.modelo);
+    r.checklist_ids = (await db.many(`SELECT id FROM checklists WHERE modelo_id = $1`, [r.id])).map((x) => x.id);
+    return r;
+  });
+
+  app.post('/api/relatorio-modelos', { limit: 1024 * 1024 }, gestao, async (req) => db.tx(async (c) => {
+    const b = corpoModelo(req.body);
+    const r = (await c.query(`INSERT INTO relatorio_modelos (nome, descricao, modelo) VALUES ($1,$2,$3::jsonb) RETURNING id, nome`, [b.nome, b.descricao, JSON.stringify(b.modelo)])).rows[0];
+    await marcarPadrao(c, r.id, b.padrao);
+    await ligarChecklists(c, r.id, req.body.checklist_ids);
+    return r;
+  }));
+
+  app.put('/api/relatorio-modelos/:id', { limit: 1024 * 1024 }, gestao, async (req) => db.tx(async (c) => {
+    const id = v.id(req.params.id);
+    const b = corpoModelo(req.body);
+    const r = (await c.query(`UPDATE relatorio_modelos SET nome = $1, descricao = $2, modelo = $3::jsonb, atualizado_em = now() WHERE id = $4 RETURNING id, nome`,
+      [b.nome, b.descricao, JSON.stringify(b.modelo), id])).rows[0];
+    if (!r) throw new HttpError(404, 'Modelo não encontrado');
+    await marcarPadrao(c, id, b.padrao);
+    await ligarChecklists(c, id, req.body.checklist_ids);
+    return r;
+  }));
+
+  app.delete('/api/relatorio-modelos/:id', gestao, async (req) => {
+    const r = await db.query(`DELETE FROM relatorio_modelos WHERE id = $1`, [v.id(req.params.id)]);
+    if (!r.rowCount) throw new HttpError(404, 'Modelo não encontrado');
+    return { ok: true };
+  });
+
+  // Normaliza um modelo importado de arquivo (a tela recebe o formato completo, com a estrutura)
+  app.post('/api/relatorio-modelos/normalizar', { limit: 1024 * 1024 }, leitura, async (req) => {
+    try { return { modelo: normalizarModelo(req.body.modelo || {}) }; } catch (e) { throw new HttpError(400, e.message); }
+  });
+
+  // Prévia do PDF: com uma atividade real (tarefa_id) ou com dados de exemplo; não grava nada
+  app.post('/api/relatorio-modelos/previa', { limit: 1024 * 1024 }, leitura, async (req, res) => {
+    let m;
+    try { m = normalizarModelo(req.body.modelo || {}); } catch (e) { throw new HttpError(400, e.message); }
+    let dados = null;
+    if (req.body.tarefa_id) { dados = await carregar(v.id(req.body.tarefa_id, 'Atividade')); if (dados) dados.t.modelo = m; }
+    const r = await desenhar(dados || exemplo(m, ''));
+    pdf(res, { ...r, nome: 'Previa_relatorio.pdf' }, false);
+  });
+
+  // ---------- Modelo do relatório (por checklist, compatibilidade) ----------
   app.get('/api/checklists/:id/relatorio', leitura, async (req) => {
-    const r = await db.one(`SELECT relatorio FROM checklists WHERE id = $1`, [v.id(req.params.id)]);
+    const r = await db.one(`SELECT COALESCE((SELECT rm.modelo FROM relatorio_modelos rm WHERE rm.id = c.modelo_id), c.relatorio) AS relatorio FROM checklists c WHERE c.id = $1`, [v.id(req.params.id)]);
     if (!r) throw new HttpError(404, 'Checklist não encontrado');
     const m = typeof r.relatorio === 'string' ? JSON.parse(r.relatorio) : r.relatorio;
     return { modelo: m ? normalizarModelo(m) : null, padrao: MODELO_PADRAO, variaveis: VARIAVEIS };
@@ -145,8 +230,17 @@ module.exports = (app) => {
   app.put('/api/checklists/:id/relatorio', { limit: 1024 * 1024 }, gestao, async (req) => {
     let m;
     try { m = req.body.modelo == null ? null : normalizarModelo(req.body.modelo); } catch (e) { throw new HttpError(400, e.message); }
-    const r = await db.query(`UPDATE checklists SET relatorio = $1::jsonb WHERE id = $2`, [m ? JSON.stringify(m) : null, v.id(req.params.id)]);
-    if (!r.rowCount) throw new HttpError(404, 'Checklist não encontrado');
+    const id = v.id(req.params.id);
+    await db.tx(async (c) => {
+      const ck = (await c.query(`SELECT id, nome, modelo_id FROM checklists WHERE id = $1`, [id])).rows[0];
+      if (!ck) throw new HttpError(404, 'Checklist não encontrado');
+      if (!m) { await c.query(`UPDATE checklists SET modelo_id = NULL, relatorio = NULL WHERE id = $1`, [id]); return; }
+      if (ck.modelo_id) await c.query(`UPDATE relatorio_modelos SET modelo = $1::jsonb, atualizado_em = now() WHERE id = $2`, [JSON.stringify(m), ck.modelo_id]);
+      else {
+        const n = (await c.query(`INSERT INTO relatorio_modelos (nome, modelo) VALUES ($1, $2::jsonb) RETURNING id`, ['Relatório · ' + ck.nome, JSON.stringify(m)])).rows[0];
+        await c.query(`UPDATE checklists SET modelo_id = $1 WHERE id = $2`, [n.id, id]);
+      }
+    });
     return { ok: true, modelo: m };
   });
 
@@ -222,6 +316,21 @@ module.exports = (app) => {
     const rel = await gerarRelatorio(id);
     if (rel) arqs.unshift({ nome: rel.nome, dados: rel.bytes });
     zip(res, criarZip(arqs), `Evidencias_${nomeArquivo(`${t.codigo || ''}_${t.endereco}_${t.atividade}`, 80)}.zip`);
+  });
+
+  // Lista das evidências do endereço (o navegador baixa as fotos e monta o .zip, sem limite de tamanho do servidor)
+  app.get('/api/enderecos/:id/evidencias', leitura, async (req) => {
+    const id = v.id(req.params.id);
+    const e = await db.one(`SELECT id, nome, codigo, municipio, uf FROM enderecos WHERE id = $1`, [id]);
+    if (!e) throw new HttpError(404, 'Endereço não encontrado');
+    const ts = await db.many(`SELECT t.id, a.nome AS atividade, t.status, t.extra FROM tarefas t JOIN atividades a ON a.id = t.atividade_id AND a.ativo
+                               WHERE t.endereco_id = $1 ORDER BY t.extra, a.ordem, a.id`, [id]);
+    const fotos = ts.length ? await db.many(
+      `SELECT ev.id, ev.tarefa_id, ev.mime, ev.legenda, ev.tirada_em, ev.criado_em, ev.tamanho, i.texto AS item
+         FROM evidencias ev LEFT JOIN checklist_itens i ON i.id = ev.item_id
+        WHERE ev.tarefa_id = ANY($1) ORDER BY ev.tarefa_id, ev.item_id NULLS LAST, ev.criado_em`, [ts.map((t) => t.id)]) : [];
+    for (const t of ts) t.fotos = fotos.filter((f) => f.tarefa_id === t.id);
+    return { endereco: e, tarefas: ts, total: fotos.length };
   });
 
   app.get('/api/enderecos/:id/evidencias.zip', escritorio, async (req, res) => {

@@ -573,3 +573,8 @@ a.pjedit{text-decoration:none}
 .xopc label{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border:1px solid var(--line);border-radius:10px;cursor:pointer}
 .xopc label:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
 .xopc small{display:block;color:var(--muted)}
+
+/* Botão de evidências do endereço (Execução) */
+.evbtn{display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:4px 9px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent);font:inherit;font-size:.78rem;font-weight:600;cursor:pointer;max-width:100%}
+.evbtn:hover{background:var(--accent);color:var(--accent-ink)}
+.evbtn:disabled{opacity:.7;cursor:wait}

@@ -10,10 +10,12 @@
 <script src="/js/api.js"></script>
 <script src="/js/shell.js"></script>
 <script src="/js/planilha.js"></script>
+<script src="/js/zip.js"></script>
 </head>
 <body>
 <script>
 const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
+const ICO_ZIP = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>';
 const ICO_REL = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>';
 const TIPO = { tecnico: ['Técnico', 'tec'], coordenacao: ['Coordenação', 'coo'], administrativo: ['Administrativo', 'adm'] };
 let mon = new Map();
@@ -195,11 +197,12 @@ function render() {
         <select class="input" id="resp" style="max-width:220px" aria-label="Responsável"><option value="">Qualquer responsável</option><option value="none" ${filtro.resp === 'none' ? 'selected' : ''}>Sem responsável</option>
           ${pessoas.filter((p) => p.ativo).map((p) => `<option value="${p.id}" ${String(p.id) === filtro.resp ? 'selected' : ''}>${RP.esc(p.nome)}</option>`).join('')}</select>
         <span class="spacer"></span><span class="muted">${ends.length} endereço(s)</span>
+        ${ends.some((e) => e.tarefas.some((t) => t.fotos)) ? `<button type="button" class="btn sm" id="evall" title="Fotos e relatórios dos endereços filtrados, uma pasta por endereço">${ICO_ZIP} Baixar evidências (.zip)</button>` : ''}
       </header>
       <div class="scroll" style="max-height:calc(100vh - 330px)">
         <div class="matrix" style="grid-template-columns:${cols};min-width:${590 + (temExtras ? 200 : 0) + proj.atividades.length * 150}px">
           <div class="mh">Endereço</div><div class="mh" title="Quantidade de cada item do contrato neste endereço · role para o lado">Itens do contrato</div><div class="mh" title="Subir os ativos para o Zabbix depois que todas as atividades forem concluídas">Monitoramento</div>${temExtras ? '<div class="mh" title="Atividades incluídas só neste endereço (ex.: escavação, poste), com quantidade e motivo">Extras do endereço</div>' : ''}${proj.atividades.map((a) => `<div class="mh" title="${RP.esc(a.nome)}">${RP.esc(a.curto || a.nome)}</div>`).join('')}
-          ${ends.map((e) => `<div class="mc"><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.municipio)}/${e.uf} · ${RP.esc(e.status)}${e.tarefas.some((t) => t.fotos) ? ` · <a href="/api/enderecos/${e.id}/evidencias.zip" title="Baixar fotos e relatórios deste endereço">evidências</a>` : ''}</div>${e.etapa ? `<div style="font-size:.78rem;color:var(--accent)">${RP.esc(e.etapa)}${e.ordem_etapa ? ' · ' + e.ordem_etapa + 'º' : ''} · início ${RP.fmtData(e.etapa_inicio)}</div>` : ''}</div>
+          ${ends.map((e) => `<div class="mc"><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.municipio)}/${e.uf} · ${RP.esc(e.status)}</div>${(() => { const n = e.tarefas.reduce((s2, t) => s2 + (t.fotos || 0), 0); return n ? `<button type="button" class="evbtn" data-ev="${e.id}" title="Baixar as fotos e os relatórios deste endereço num arquivo .zip">${ICO_ZIP} Evidências · ${n} foto${n > 1 ? 's' : ''}</button>` : ''; })()}${e.etapa ? `<div style="font-size:.78rem;color:var(--accent)">${RP.esc(e.etapa)}${e.ordem_etapa ? ' · ' + e.ordem_etapa + 'º' : ''} · início ${RP.fmtData(e.etapa_inicio)}</div>` : ''}</div>
             <div class="mc"><div class="itroll" tabindex="0" aria-label="Itens do contrato em ${RP.esc(e.nome)}">${itensCt.length ? itensCt.map((i) => { const n = (e.itens || {})[i.id] || 0; return `<span class="itq${n ? '' : ' z'}" title="${RP.esc(i.nome)}: ${n}"><b>${RP.fmtN(n)}</b>${RP.esc(i.nome)}</span>`; }).join('') : `<span class="itq"><b>${RP.fmtN(e.cameras)}</b>Câmeras</span>`}</div></div>
             <div class="mc">${monChip(e)}</div>
             ${temExtras ? `<div class="mc"><div class="xcol">${e.tarefas.filter((t) => t.extra).map((t) => `<button type="button" class="xchip ${t.status}" data-t="${t.id}" title="${RP.esc(t.atividade)} · ${ST[t.status]}${t.responsavel ? ' · ' + RP.esc(t.responsavel) : ''}${t.motivo ? ' · ' + RP.esc(t.motivo) : ''}"><i></i><span class="n">${RP.esc(t.curto || t.atividade)}</span><small>×${fmtQ(t.quantidade)}</small></button>`).join('')}${podeExtra ? `<button type="button" class="xadd" data-xadd="${e.id}">+ Extra</button>` : ''}</div></div>` : ''}
@@ -223,6 +226,32 @@ function render() {
   RP.$$('.cell, .xchip', S.content).forEach((b) => (b.onclick = () => editar(+b.dataset.t)));
   RP.$$('[data-xadd]', S.content).forEach((b) => (b.onclick = () => novaExtra(+b.dataset.xadd)));
   RP.$$('[data-mon]', S.content).forEach((b) => (b.onclick = () => monitorar(+b.dataset.mon)));
+  RP.$$('[data-ev]', S.content).forEach((b) => (b.onclick = () => baixarEvidencias([+b.dataset.ev], b)));
+  RP.$('#evall')?.addEventListener('click', (ev) => {
+    const ids = ends.filter((e) => e.tarefas.some((t) => t.fotos)).map((e) => e.id);
+    if (!ids.length) return RP.toast('Nenhum endereço com fotos nestes filtros');
+    const nf = ends.reduce((s2, e) => s2 + e.tarefas.reduce((a, t) => a + (t.fotos || 0), 0), 0);
+    if (!confirm(`Baixar as evidências de ${ids.length} endereço(s), ${nf} foto(s), com os relatórios em PDF? Pode levar alguns minutos.`)) return;
+    baixarEvidencias(ids, ev.currentTarget);
+  });
+}
+
+// Evidências em .zip montado no navegador: uma pasta por endereço e por atividade, com as fotos e o relatório PDF
+async function baixarEvidencias(ids, botao, tarefa = null) {
+  if (baixarEvidencias.rodando) return RP.toast('Já há um download de evidências em andamento');
+  baixarEvidencias.rodando = true;
+  const txt = botao ? botao.innerHTML : '';
+  const aviso = (msg) => { if (botao) botao.textContent = msg.length > 44 ? msg.slice(0, 42) + '…' : msg; };
+  if (botao) botao.disabled = true;
+  try {
+    const e = ids.length === 1 ? proj.enderecos.find((x) => x.id === ids[0]) : null;
+    const t = tarefa && e ? e.tarefas.find((x) => x.id === tarefa) : null;
+    const nomeArq = e ? `Evidencias_${Zip.nome(`${e.codigo ? e.codigo + '_' : ''}${e.nome}${t ? '_' + (t.atividade || '') : ''}`, 90)}.zip`
+      : `Evidencias_${Zip.nome(`${proj.contrato.cliente}_${proj.contrato.numero}`, 70)}_${ids.length}_enderecos.zip`;
+    const r = await Zip.evidencias({ enderecos: ids, nomeArquivo: nomeArq, tarefa, progresso: aviso });
+    RP.toast(`Arquivo pronto: ${r.fotos} foto(s)${r.falhas ? `, ${r.falhas} item(ns) não baixaram` : ''} (${(r.tamanho / 1048576).toFixed(1).replace('.', ',')} MB)`);
+  } catch (er) { RP.toast(er.message); }
+  finally { baixarEvidencias.rodando = false; if (botao) { botao.disabled = false; botao.innerHTML = txt; } }
 }
 
 // ---------- Monitoramento (Zabbix) ----------
@@ -412,7 +441,8 @@ async function editar(tid) {
       <div class="field" style="flex:1"><label for="d-f">Fim previsto</label><input class="input" type="date" id="d-f" value="${t.prevista_fim || ''}"></div></div>
     <div class="row" style="gap:8px;margin-bottom:14px"><a class="btn sm ${t.status === 'concluida' ? 'primary' : ''}" href="/api/tarefas/${t.id}/relatorio.pdf" target="_blank" rel="noopener">${ICO_REL} ${t.status === 'concluida' ? 'Relatório final (PDF)' : 'Relatório parcial (PDF)'}</a>
       <a class="btn sm" href="/api/tarefas/${t.id}/relatorio.pdf?baixar=1">Baixar</a>
-      ${t.fotos ? `<a class="btn sm" href="/api/tarefas/${t.id}/evidencias.zip" title="Fotos e relatório desta atividade">Evidências (.zip)</a>` : ''}</div>
+      ${t.fotos ? `<button type="button" class="btn sm" id="d-evz" title="Fotos e relatório desta atividade">Evidências da atividade (.zip)</button>` : ''}
+      ${Shell.pode('checklists') ? '<a class="btn sm" href="/app/relatorios.html" title="Estrutura, objetivo, campos e evidências do relatório">Ajustar o relatório</a>' : ''}</div>
     <div class="assbox" id="d-ass"><span class="muted">Assinatura do cliente: carregando…</span></div>
     <h3 style="font-size:1.05rem;margin:18px 0 8px">Checklist</h3><div id="d-ck" class="muted">Carregando…</div>
     <div class="field"><label for="d-c">Comentário</label><textarea class="input" id="d-c" placeholder="Opcional — fica no histórico"></textarea></div>
@@ -444,6 +474,7 @@ async function editar(tid) {
     if (!confirm(`Remover "${a.nome}" deste endereço? Fica registrado na auditoria.`)) return;
     try { await RP.api('/tarefas/' + tid, { method: 'DELETE' }); e.tarefas = e.tarefas.filter((x) => x.id !== tid); d.close(); render(); RP.toast('Atividade extra removida'); } catch (er) { RP.toast(er.message); }
   }));
+  RP.$('#d-evz', d.el)?.addEventListener('click', (ev) => baixarEvidencias([e.id], ev.currentTarget, tid));
   assinaturaBox(tid, RP.$('#d-ass', d.el));
   RP.api(`/tarefas/${tid}/checklist`).then((c) => { RP.$('#d-ck', d.el).innerHTML = checklistHtml(c); }).catch(() => { RP.$('#d-ck', d.el).textContent = ''; });
   const ev = await RP.api(`/tarefas/${tid}/eventos`);

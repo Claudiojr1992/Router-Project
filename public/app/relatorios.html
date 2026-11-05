@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relatórios · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+<style>
+.rl{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,44%);gap:16px;align-items:start}
+.rl .prev{position:sticky;top:12px}
+.rl iframe{width:100%;height:calc(100vh - 210px);min-height:520px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.sec-l{display:grid;gap:8px}
+.sec-r{display:grid;grid-template-columns:auto auto 1fr auto;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel)}
+.sec-r.off{opacity:.55}
+.sec-r .mv{display:flex;flex-direction:column;gap:2px}
+.sec-r .mv button{border:1px solid var(--line);background:var(--soft);border-radius:6px;width:26px;height:20px;line-height:1;cursor:pointer;color:var(--ink)}
+.sec-r .tp{font-size:.75rem;color:var(--muted);white-space:nowrap}
+.sec-r textarea,.sec-r .vars{grid-column:1/-1}
+.sec-r textarea{min-height:80px}
+.cmp-r{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto auto auto;gap:6px;align-items:center;margin-bottom:6px}
+.cmp-r button{border:1px solid var(--line);background:var(--soft);border-radius:6px;min-width:28px;height:32px;cursor:pointer;color:var(--ink)}
+.vars{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 10px}
+.vars button{border:1px dashed var(--line);background:none;border-radius:999px;padding:2px 8px;font-size:.78rem;color:var(--muted);cursor:pointer}
+.vars button:hover{color:var(--accent);border-color:var(--accent)}
+.evi-l{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:4px 14px;margin-top:6px}
+.rl .card>.body{padding:16px}
+.rl h3{font-size:1.1rem;margin:0 0 10px}
+@media (max-width:1100px){.rl{grid-template-columns:minmax(0,1fr)}.rl .prev{position:static}.rl iframe{height:70vh}}
+</style>
+</head>
+<body>
+<script>
+// Relatórios: modelos que definem a estrutura do PDF de cada atividade (seções, objetivo, identificação, evidências e aceite)
+let S, meta, lista = [], atual = null, m = null, aba = 'estrutura', sujo = false, urlPrev = null;
+const ABAS = [['estrutura', 'Estrutura'], ['identidade', 'Capa e identidade'], ['identificacao', 'Identificação'], ['evidencias', 'Evidências'], ['aceite', 'Aceite e assinaturas'], ['uso', 'Onde é usado']];
+const COM_TEXTO = ['objetivo', 'texto', 'termo'];
+const copia = (o) => JSON.parse(JSON.stringify(o));
+
+(async () => {
+  S = await Shell.init({ key: 'relatorios', title: 'Relatórios', sub: 'Estrutura do relatório em PDF de cada atividade: seções, objetivo, campos, evidências e aceite', perfis: Shell.ESC });
+  const pode = Shell.pode('checklists', 'editar');
+  S.actions.innerHTML = pode ? '<button class="btn sm" id="imp">Importar JSON</button><button class="btn sm primary" id="novo">+ Novo modelo</button>' : '';
+  RP.$('#novo')?.addEventListener('click', () => novo());
+  RP.$('#imp')?.addEventListener('click', importar);
+  [meta, lista] = await Promise.all([RP.api('/relatorio-modelos/meta'), RP.api('/relatorio-modelos')]);
+  const qs = +new URLSearchParams(location.search).get('id');
+  if (lista.length) await abrir(qs && lista.some((x) => x.id === qs) ? qs : lista[0].id); else novo(true);
+})();
+
+async function abrir(id) {
+  if (sujo && !confirm('Há alterações não salvas neste modelo. Descartar?')) return;
+  const r = await RP.api('/relatorio-modelos/' + id);
+  atual = { id: r.id, nome: r.nome, descricao: r.descricao || '', padrao: r.padrao, checklist_ids: r.checklist_ids };
+  m = r.modelo; sujo = false;
+  history.replaceState(null, '', '/app/relatorios.html?id=' + id);
+  render(); previa();
+}
+function novo(primeiro = false, base = null) {
+  if (!primeiro && sujo && !confirm('Há alterações não salvas neste modelo. Descartar?')) return;
+  atual = { id: null, nome: base ? base.nome + ' (cópia)' : primeiro ? 'Relatório técnico de entrega' : 'Novo modelo', descricao: '', padrao: primeiro && !lista.length, checklist_ids: [] };
+  m = copia(base ? base.modelo : meta.padrao); sujo = !!base || primeiro;
+  render(); previa();
+}
+
+function render() {
+  const pode = Shell.pode('checklists', 'editar');
+  S.content.innerHTML = `
+    <div class="card"><div class="body row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="margin:0;min-width:240px;flex:1"><label for="sel">Modelo</label><select class="input" id="sel">
+        ${atual.id ? '' : `<option value="" selected>${RP.esc(atual.nome)} (não salvo)</option>`}
+        ${lista.map((x) => `<option value="${x.id}" ${x.id === atual.id ? 'selected' : ''}>${RP.esc(x.nome)}${x.padrao ? ' · padrão' : ''}${x.checklists.length ? ` · ${x.checklists.length} checklist(s)` : ''}</option>`).join('')}</select></div>
+      ${pode ? `<button class="btn sm" id="dup" ${atual.id ? '' : 'disabled'}>Duplicar</button><button class="btn sm" id="exp">Exportar JSON</button>
+        <button class="btn sm danger" id="del" ${atual.id ? '' : 'disabled'}>Excluir</button><button class="btn primary" id="salvar">${sujo ? 'Salvar alterações' : 'Salvo'}</button>` : ''}
+    </div></div>
+    <div class="rl">
+      <div class="card"><div class="tabs" role="tablist">${ABAS.map(([k, l]) => `<button role="tab" aria-selected="${k === aba}" data-aba="${k}">${l}</button>`).join('')}</div>
+        <div class="body" id="ed"></div></div>
+      <div class="prev"><div class="card"><div class="body" style="padding:12px">
+        <div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <select class="input" id="pv-t" style="flex:1;min-width:200px" aria-label="Atividade para a prévia"><option value="">Prévia com dados de exemplo</option>
+            ${meta.tarefas.map((t) => `<option value="${t.id}">${RP.esc(t.atividade)} · ${RP.esc(t.endereco)} (${t.fotos} foto${t.fotos === 1 ? '' : 's'})</option>`).join('')}</select>
+          <button class="btn sm" id="pv-go">Atualizar prévia</button></div>
+        <iframe id="pv" title="Prévia do relatório"></iframe></div></div></div>
+    </div>`;
+  RP.$('#sel').onchange = (e) => (e.target.value ? abrir(+e.target.value) : null);
+  RP.$$('[data-aba]').forEach((b) => (b.onclick = () => { aba = b.dataset.aba; RP.$$('[data-aba]').forEach((x) => x.setAttribute('aria-selected', x === b)); editor(); }));
+  RP.$('#pv-go').onclick = previa; RP.$('#pv-t').onchange = previa;
+  RP.$('#salvar')?.addEventListener('click', (e) => RP.busy(e.currentTarget, salvar));
+  RP.$('#dup')?.addEventListener('click', () => novo(false, { nome: atual.nome, modelo: m }));
+  RP.$('#exp')?.addEventListener('click', () => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify({ nome: atual.nome, descricao: atual.descricao, modelo: m }, null, 2)], { type: 'application/json' }));
+    a.download = `modelo-relatorio-${atual.nome.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  });
+  RP.$('#del')?.addEventListener('click', async () => {
+    if (!confirm(`Excluir o modelo "${atual.nome}"? Os checklists que usam este modelo passam a usar o modelo padrão.`)) return;
+    await RP.api('/relatorio-modelos/' + atual.id, { method: 'DELETE' }); sujo = false;
+    lista = await RP.api('/relatorio-modelos'); RP.toast('Modelo excluído');
+    if (lista.length) abrir(lista[0].id); else novo(true);
+  });
+  editor();
+}
+
+function mudou(prev = true) {
+  sujo = true; const b = RP.$('#salvar'); if (b) b.textContent = 'Salvar alterações';
+  if (prev) { clearTimeout(mudou._t); mudou._t = setTimeout(previa, 1200); }
+}
+
+function editor() {
+  const ed = RP.$('#ed');
+  const vchips = (alvo) => `<div class="vars" data-alvo="${alvo}">${meta.variaveis.map((v) => `<button type="button" data-v="${v}">{${v}}</button>`).join('')}</div>`;
+  if (aba === 'estrutura') {
+    ed.innerHTML = `<p class="muted" style="margin-top:0">As seções saem no PDF nesta ordem. Desmarque para tirar, use as setas para mudar a ordem, troque o título e o texto. As variáveis entre chaves, como {atividade}, viram os dados da atividade.</p>
+      <div class="sec-l">${m.estrutura.map((s, i) => `<div class="sec-r ${s.ativo ? '' : 'off'}" data-i="${i}">
+        <div class="mv"><button type="button" data-up="${i}" aria-label="Subir" ${i ? '' : 'disabled'}>▲</button><button type="button" data-dn="${i}" aria-label="Descer" ${i < m.estrutura.length - 1 ? '' : 'disabled'}>▼</button></div>
+        <input type="checkbox" data-on="${i}" ${s.ativo ? 'checked' : ''} aria-label="Incluir a seção ${RP.esc(s.titulo)}">
+        <div><input class="input" data-tit="${i}" value="${RP.esc(s.titulo)}" aria-label="Título da seção"><div class="tp">${RP.esc(meta.tipos[s.tipo])}${s.tipo === 'texto' ? ' (seção livre)' : ''}</div></div>
+        ${s.tipo === 'texto' ? `<button type="button" class="btn sm danger" data-rm="${i}" aria-label="Remover seção">×</button>` : '<span></span>'}
+        ${COM_TEXTO.includes(s.tipo) ? `<textarea class="input" data-txt="${i}" aria-label="Texto da seção">${RP.esc(s.texto || '')}</textarea>${vchips('txt-' + i)}` : ''}
+      </div>`).join('')}</div>
+      <div class="row" style="gap:8px;margin-top:12px"><button class="btn sm" type="button" id="add-txt">+ Incluir seção de texto</button>
+        <button class="btn sm" type="button" id="pad-est">Voltar à estrutura padrão</button></div>`;
+    const mover = (i, d) => { const [x] = m.estrutura.splice(i, 1); m.estrutura.splice(i + d, 0, x); mudou(); editor(); };
+    RP.$$('[data-up]', ed).forEach((b) => (b.onclick = () => mover(+b.dataset.up, -1)));
+    RP.$$('[data-dn]', ed).forEach((b) => (b.onclick = () => mover(+b.dataset.dn, 1)));
+    RP.$$('[data-on]', ed).forEach((c) => (c.onchange = () => { m.estrutura[+c.dataset.on].ativo = c.checked; c.closest('.sec-r').classList.toggle('off', !c.checked); mudou(); }));
+    RP.$$('[data-tit]', ed).forEach((c) => (c.oninput = () => { m.estrutura[+c.dataset.tit].titulo = c.value; mudou(); }));
+    RP.$$('[data-txt]', ed).forEach((c) => (c.oninput = () => { m.estrutura[+c.dataset.txt].texto = c.value; mudou(); }));
+    RP.$$('[data-rm]', ed).forEach((b) => (b.onclick = () => { m.estrutura.splice(+b.dataset.rm, 1); mudou(); editor(); }));
+    RP.$('#add-txt', ed).onclick = () => { const it = m.estrutura.findIndex((s) => s.tipo === 'termo'); m.estrutura.splice(it >= 0 ? it : m.estrutura.length, 0, { tipo: 'texto', titulo: 'Observações', ativo: true, texto: '' }); mudou(); editor(); };
+    RP.$('#pad-est', ed).onclick = () => { if (confirm('Voltar as seções, títulos e textos para o padrão?')) { m.estrutura = copia(meta.padrao.estrutura); mudou(); editor(); } };
+    ligarVars(ed, (alvo, v) => { const i = +alvo.split('-')[1]; const ta = RP.$(`[data-txt="${i}"]`, ed); inserir(ta, v); m.estrutura[i].texto = ta.value; mudou(); });
+  } else if (aba === 'identidade') {
+    ed.innerHTML = `<div class="field"><label for="i-t">Título do relatório</label><input class="input" id="i-t" value="${RP.esc(m.titulo)}" placeholder="Relatório técnico de entrega"></div>
+      <div class="field"><label for="i-s">Subtítulo</label><input class="input" id="i-s" value="${RP.esc(m.subtitulo)}" placeholder="Em branco = nome da atividade"><small>Aceita variáveis, ex.: Entrega de CFTV · {endereco}</small></div>
+      <div class="row"><div class="field" style="flex:1"><label for="i-e">Empresa (texto)</label><input class="input" id="i-e" value="${RP.esc(m.empresa)}" placeholder="Em branco = empresa executora do contrato"></div>
+        <div class="field" style="width:150px"><label for="i-c">Cor</label><input class="input" type="color" id="i-c" value="${RP.esc(m.cor)}" style="height:42px;padding:4px"></div></div>
+      <label class="check"><input type="checkbox" id="i-capa" ${m.capa ? 'checked' : ''}><span><b>Página de capa</b><br><span class="muted">Logo, título, projeto e as pessoas envolvidas (analista, responsável pela implantação, elaborado por).</span></span></label>
+      <div class="field"><label for="i-l">Logo do modelo</label><div class="row" style="gap:12px;align-items:center"><div id="i-prev" style="width:84px;height:84px;border:1px dashed var(--line);border-radius:10px;display:grid;place-items:center;background:#fff;overflow:hidden"></div>
+        <div style="display:flex;flex-direction:column;gap:6px"><input type="file" id="i-l" accept="image/png,image/jpeg"><button class="btn sm" type="button" id="i-lx">Remover logo</button></div></div>
+        <small>Usado quando a empresa executora do contrato não tem logo cadastrado em Empresas.</small></div>`;
+    const lp = () => { RP.$('#i-prev', ed).innerHTML = m.logo ? `<img src="${m.logo}" alt="Logo" style="max-width:100%;max-height:100%">` : '<span class="muted" style="font-size:.8rem">Sem logo</span>'; };
+    lp();
+    RP.$('#i-t', ed).oninput = (e) => { m.titulo = e.target.value; mudou(); };
+    RP.$('#i-s', ed).oninput = (e) => { m.subtitulo = e.target.value; mudou(); };
+    RP.$('#i-e', ed).oninput = (e) => { m.empresa = e.target.value; mudou(); };
+    RP.$('#i-c', ed).oninput = (e) => { m.cor = e.target.value; mudou(); };
+    RP.$('#i-capa', ed).onchange = (e) => { m.capa = e.target.checked; mudou(); };
+    RP.$('#i-l', ed).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; try { m.logo = await lerLogo(f); lp(); mudou(); } catch (er) { RP.toast(er.message); } };
+    RP.$('#i-lx', ed).onclick = () => { m.logo = null; lp(); mudou(); };
+  } else if (aba === 'identificacao') {
+    ed.innerHTML = `<p class="muted" style="margin-top:0">Linhas da tabela “Identificação da unidade”. Inclua, tire ou reordene. O valor aceita texto fixo e variáveis.</p>
+      <div id="cmp">${m.campos.map((c, i) => `<div class="cmp-r"><input class="input" data-cr="${i}" value="${RP.esc(c.rotulo)}" placeholder="Campo" aria-label="Nome do campo">
+        <input class="input" data-cv="${i}" value="${RP.esc(c.valor)}" placeholder="Valor, ex.: {cliente}" aria-label="Valor do campo">
+        <button type="button" data-cu="${i}" aria-label="Subir" ${i ? '' : 'disabled'}>▲</button><button type="button" data-cd="${i}" aria-label="Descer" ${i < m.campos.length - 1 ? '' : 'disabled'}>▼</button><button type="button" data-cx="${i}" aria-label="Remover">×</button></div>`).join('')}</div>
+      <p class="muted" style="font-size:.85rem;margin:8px 0 2px">Clique numa variável para colocar no último valor em que você clicou:</p>${vchips('campo')}
+      <div class="row" style="gap:8px"><button class="btn sm" type="button" id="c-add">+ Campo</button><button class="btn sm" type="button" id="c-pad">Voltar aos campos padrão</button></div>`;
+    let foco = null;
+    const mov = (i, d) => { const [x] = m.campos.splice(i, 1); m.campos.splice(i + d, 0, x); mudou(); editor(); };
+    RP.$$('[data-cr]', ed).forEach((c) => (c.oninput = () => { m.campos[+c.dataset.cr].rotulo = c.value; mudou(); }));
+    RP.$$('[data-cv]', ed).forEach((c) => { c.oninput = () => { m.campos[+c.dataset.cv].valor = c.value; mudou(); }; c.onfocus = () => (foco = c); });
+    RP.$$('[data-cu]', ed).forEach((b) => (b.onclick = () => mov(+b.dataset.cu, -1)));
+    RP.$$('[data-cd]', ed).forEach((b) => (b.onclick = () => mov(+b.dataset.cd, 1)));
+    RP.$$('[data-cx]', ed).forEach((b) => (b.onclick = () => { m.campos.splice(+b.dataset.cx, 1); mudou(); editor(); }));
+    RP.$('#c-add', ed).onclick = () => { if (m.campos.length >= 20) return RP.toast('Até 20 campos'); m.campos.push({ rotulo: 'Novo campo', valor: '' }); mudou(); editor(); RP.$$('[data-cr]', ed).pop().select(); };
+    RP.$('#c-pad', ed).onclick = () => { if (confirm('Voltar aos campos padrão?')) { m.campos = copia(meta.padrao.campos); mudou(); editor(); } };
+    ligarVars(ed, (alvo, v) => { const c = foco || RP.$$('[data-cv]', ed).pop(); if (!c) return; inserir(c, v); m.campos[+c.dataset.cv].valor = c.value; mudou(); });
+  } else if (aba === 'evidencias') {
+    const e = m.evidencias;
+    const cks = meta.checklists.filter((c) => atual.checklist_ids.includes(c.id));
+    const fonte = cks.length ? cks : meta.checklists;
+    const itens = [...new Set(fonte.flatMap((c) => c.itens.filter((i) => i.tipo === 'foto').map((i) => i.texto)))];
+    const fora = new Set(e.excluir.map((x) => x.toLowerCase()));
+    ed.innerHTML = `<div class="field"><label>Fotos por linha</label><div class="seg" style="grid-template-columns:repeat(3,1fr);max-width:360px">${[1, 2, 3].map((n) => `<label><input type="radio" name="e-col" value="${n}" ${e.colunas === n ? 'checked' : ''}><span>${n} ${n === 1 ? 'grande' : n === 2 ? 'média' : 'pequena'}${n > 1 ? 's' : ''}</span></label>`).join('')}</div></div>
+      <label class="check"><input type="checkbox" id="e-ag" ${e.agrupar ? 'checked' : ''}><span><b>Agrupar pelo item do checklist</b><br><span class="muted">Cada grupo com o nome do item (ex.: “Foto de cada câmera instalada”).</span></span></label>
+      <div class="field" style="margin-top:12px"><label>Legenda de cada foto</label><div class="row" style="gap:14px">
+        <label class="check" style="margin:0"><input type="checkbox" data-lg="data" ${e.legenda.data ? 'checked' : ''}> Data e hora</label>
+        <label class="check" style="margin:0"><input type="checkbox" data-lg="autor" ${e.legenda.autor ? 'checked' : ''}> Quem tirou</label>
+        <label class="check" style="margin:0"><input type="checkbox" data-lg="local" ${e.legenda.local ? 'checked' : ''}> Endereço / coordenadas</label></div></div>
+      <div class="field" style="max-width:260px"><label for="e-max">Máximo de fotos no relatório</label><input class="input" id="e-max" type="number" min="0" max="300" value="${e.maximo || ''}" placeholder="Todas"></div>
+      <div class="field"><label>Evidências que entram no relatório</label>
+        <small>${cks.length ? 'Itens de foto dos checklists que usam este modelo.' : 'Itens de foto de todos os checklists (ligue o modelo a checklists na aba “Onde é usado” para ver só os deles).'} Desmarque para deixar fora do PDF. Para pedir uma evidência nova ao técnico, inclua um item do tipo Foto no checklist.</small>
+        <div class="evi-l">${[...itens, '__geral__'].map((t) => `<label class="check" style="margin:0"><input type="checkbox" data-ev="${RP.esc(t)}" ${fora.has(t.toLowerCase()) ? '' : 'checked'}> ${t === '__geral__' ? '<i>Fotos gerais (sem item do checklist)</i>' : RP.esc(t)}</label>`).join('')}</div>
+        <a class="btn sm" href="/app/checklists.html" style="margin-top:10px">Editar itens de evidência nos checklists</a></div>`;
+    RP.$$('input[name="e-col"]', ed).forEach((r) => (r.onchange = () => { e.colunas = +r.value; mudou(); }));
+    RP.$('#e-ag', ed).onchange = (x) => { e.agrupar = x.target.checked; mudou(); };
+    RP.$$('[data-lg]', ed).forEach((c) => (c.onchange = () => { e.legenda[c.dataset.lg] = c.checked; mudou(); }));
+    RP.$('#e-max', ed).oninput = (x) => { e.maximo = Math.max(0, parseInt(x.target.value, 10) || 0); mudou(); };
+    RP.$$('[data-ev]', ed).forEach((c) => (c.onchange = () => {
+      const t = c.dataset.ev.toLowerCase(); e.excluir = e.excluir.filter((x) => x.toLowerCase() !== t); if (!c.checked) e.excluir.push(c.dataset.ev); mudou();
+    }));
+  } else if (aba === 'aceite') {
+    ed.innerHTML = `<p class="muted" style="margin-top:0">Quem assina no fim do relatório (até 4). A linha com “cliente” ou “recebimento” fica genérica, com nome, cargo e data em branco, e recebe a assinatura digital quando o cliente assina pelo link. O texto do termo fica na aba Estrutura.</p>
+      <div id="ass">${m.assinaturas.map((a, i) => `<div class="cmp-r" style="grid-template-columns:minmax(0,1fr) auto"><input class="input" data-as="${i}" value="${RP.esc(a)}" aria-label="Quem assina"><button type="button" data-ax="${i}" aria-label="Remover">×</button></div>`).join('')}</div>
+      <button class="btn sm" type="button" id="a-add" ${m.assinaturas.length >= 4 ? 'disabled' : ''}>+ Assinatura</button>`;
+    RP.$$('[data-as]', ed).forEach((c) => (c.oninput = () => { m.assinaturas[+c.dataset.as] = c.value; mudou(); }));
+    RP.$$('[data-ax]', ed).forEach((b) => (b.onclick = () => { m.assinaturas.splice(+b.dataset.ax, 1); mudou(); editor(); }));
+    RP.$('#a-add', ed).onclick = () => { m.assinaturas.push('Testemunha'); mudou(); editor(); };
+  } else if (aba === 'uso') {
+    const outro = (c) => c.modelo_id && c.modelo_id !== atual.id ? lista.find((x) => x.id === c.modelo_id) : null;
+    ed.innerHTML = `<div class="field"><label for="u-n">Nome do modelo</label><input class="input" id="u-n" value="${RP.esc(atual.nome)}"></div>
+      <div class="field"><label for="u-d">Descrição</label><input class="input" id="u-d" value="${RP.esc(atual.descricao)}" placeholder="Ex.: entrega de link e CFTV para bancos"></div>
+      <label class="check"><input type="checkbox" id="u-p" ${atual.padrao ? 'checked' : ''}><span><b>Modelo padrão</b><br><span class="muted">Vale para as atividades cujo checklist não tem modelo, e para as atividades sem checklist.</span></span></label>
+      <div class="field" style="margin-top:12px"><label>Checklists que usam este modelo</label>
+        <div class="evi-l">${meta.checklists.map((c) => `<label class="check" style="margin:0"><input type="checkbox" data-ck="${c.id}" ${atual.checklist_ids.includes(c.id) ? 'checked' : ''}> ${RP.esc(c.nome)}${outro(c) ? ` <span class="muted" style="font-size:.78rem">(hoje: ${RP.esc(outro(c).nome)})</span>` : ''}</label>`).join('') || '<span class="muted">Nenhum checklist cadastrado.</span>'}</div></div>`;
+    RP.$('#u-n', ed).oninput = (e) => { atual.nome = e.target.value; mudou(false); };
+    RP.$('#u-d', ed).oninput = (e) => { atual.descricao = e.target.value; mudou(false); };
+    RP.$('#u-p', ed).onchange = (e) => { atual.padrao = e.target.checked; mudou(false); };
+    RP.$$('[data-ck]', ed).forEach((c) => (c.onchange = () => { const id = +c.dataset.ck; atual.checklist_ids = atual.checklist_ids.filter((x) => x !== id); if (c.checked) atual.checklist_ids.push(id); mudou(false); }));
+  }
+}
+
+function ligarVars(ed, fn) { RP.$$('.vars', ed).forEach((g) => RP.$$('[data-v]', g).forEach((b) => (b.onclick = () => fn(g.dataset.alvo, `{${b.dataset.v}}`)))); }
+function inserir(el, v) { const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? a; el.value = el.value.slice(0, a) + v + el.value.slice(b); el.focus(); el.setSelectionRange(a + v.length, a + v.length); }
+function lerLogo(file) {
+  return new Promise((ok, erro) => {
+    if (!/^image\/(png|jpe?g)$/.test(file.type)) return erro(new Error('Use uma imagem PNG ou JPG'));
+    const im = new Image(), url = URL.createObjectURL(file);
+    im.onload = () => { const k = Math.min(1, 600 / Math.max(im.width, im.height)), cv = document.createElement('canvas'); cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k);
+      cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url); let d = cv.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.9); if (d.length > 400000) d = cv.toDataURL('image/jpeg', 0.8); ok(d); };
+    im.onerror = () => erro(new Error('Não foi possível ler a imagem')); im.src = url;
+  });
+}
+
+async function previa() {
+  const f = RP.$('#pv'); if (!f) return;
+  const tid = RP.$('#pv-t').value;
+  try {
+    const r = await fetch('/api/relatorio-modelos/previa', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modelo: m, tarefa_id: tid ? +tid : null }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.erro || 'Não foi possível gerar a prévia'); }
+    if (urlPrev) URL.revokeObjectURL(urlPrev);
+    urlPrev = URL.createObjectURL(await r.blob());
+    f.src = urlPrev + '#view=FitH';
+  } catch (e) { RP.toast(e.message); }
+}
+
+async function salvar() {
+  if (!atual.nome.trim()) { aba = 'uso'; render(); return RP.toast('Dê um nome ao modelo'); }
+  const body = { nome: atual.nome, descricao: atual.descricao, padrao: atual.padrao, modelo: m, checklist_ids: atual.checklist_ids };
+  try {
+    const r = atual.id ? await RP.api('/relatorio-modelos/' + atual.id, { method: 'PUT', body }) : await RP.api('/relatorio-modelos', { method: 'POST', body });
+    sujo = false; [lista, meta] = await Promise.all([RP.api('/relatorio-modelos'), RP.api('/relatorio-modelos/meta')]);
+    RP.toast('Modelo salvo'); await abrir(r.id);
+  } catch (e) { RP.toast(e.message); }
+}
+
+function importar() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json,.json';
+  inp.onchange = async () => {
+    try { const j = JSON.parse(await inp.files[0].text()); const r = await RP.api('/relatorio-modelos/normalizar', { method: 'POST', body: { modelo: j.modelo || j } }); novo(false, { nome: j.nome || 'Modelo importado', modelo: r.modelo }); atual.nome = j.nome || 'Modelo importado'; render(); RP.toast('Modelo importado. Confira e salve.'); }
+    catch (er) { RP.toast(er instanceof SyntaxError ? 'Arquivo inválido: use um JSON exportado por esta tela' : er.message); }
+  };
+  inp.click();
+}
+addEventListener('beforeunload', (e) => { if (sujo) { e.preventDefault(); e.returnValue = ''; } });
+</script>
+</body>
+</html>

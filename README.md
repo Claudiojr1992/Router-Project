@@ -648,6 +648,17 @@ As ações menos usadas da lista de endereços (alterar ou excluir os listados, 
 - Endereço, altitude e precisão também ficam gravados com a foto (migração `021_foto_carimbo.sql`) e aparecem na legenda das evidências do relatório.
 - O técnico pode desligar o carimbo na tela da atividade ("Carimbar data, hora, endereço e mapa na foto").
 
+## Tela Relatórios (estrutura do PDF) e download das evidências
+
+- **Relatórios** (menu Preparar projeto): modelos do relatório em PDF com prévia ao lado, usando dados de exemplo ou uma atividade real.
+  - *Estrutura*: as seções na ordem do PDF; desmarque para tirar, use as setas para reordenar, troque título e texto (objetivo, termo) e inclua seções de texto livres. Variáveis como `{cliente}`, `{atividade}`, `{analista}`.
+  - *Capa e identidade*: título, subtítulo, cor, capa sim/não e logo (o logo da empresa executora tem prioridade).
+  - *Identificação*: inclua, tire e reordene os campos da tabela da unidade.
+  - *Evidências*: fotos por linha (1, 2 ou 3), agrupamento pelo item do checklist, o que vai na legenda, máximo de fotos e quais itens de foto entram.
+  - *Aceite e assinaturas* e *Onde é usado* (checklists ligados e modelo padrão). Exportar/importar em JSON.
+  - Migração `022_relatorio_modelos.sql`: os modelos que estavam dentro de cada checklist viraram modelos desta tela.
+- **Evidências em .zip** na Execução: botão em cada endereço com fotos, botão "Baixar evidências (.zip)" para todos os endereços filtrados e, no detalhe da atividade, só daquela atividade. O arquivo é montado no navegador (uma pasta por endereço e por atividade, com as fotos e o relatório PDF), sem o limite de tamanho de resposta do servidor.
+
 ## Vercel + Supabase
 
 O mesmo código roda no Vercel como uma função só (`api/index.js`), com o banco no Supabase.

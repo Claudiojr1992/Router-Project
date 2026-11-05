@@ -22,7 +22,7 @@ function cliente() {
     const txt = await r.text(); let json = null; try { json = JSON.parse(txt); } catch (_) { /* não é JSON */ }
     return { status: r.status, json };
   };
-  return { get: (u) => req('GET', u), post: (u, b) => req('POST', u, b || {}), put: (u, b) => req('PUT', u, b || {}), patch: (u, b) => req('PATCH', u, b || {}), del: (u) => req('DELETE', u) };
+  return { cookie: () => cookie, get: (u) => req('GET', u), post: (u, b) => req('POST', u, b || {}), put: (u, b) => req('PUT', u, b || {}), patch: (u, b) => req('PATCH', u, b || {}), del: (u) => req('DELETE', u) };
 }
 
 test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco de teste' }, async (t) => {
@@ -159,6 +159,26 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     const c = lista.find((x) => x.nome === 'Lead ' + sufixo);
     assert.ok(c && c.status === 'novo');
     assert.equal((await admin.patch('/api/contatos/' + c.id, { status: 'em_contato', nota: 'Ligar terça' })).json.status, 'em_contato');
+  });
+
+  await t.test('relatórios: modelo com estrutura própria, ligado ao checklist, e lista de evidências do endereço', async () => {
+    const meta = (await admin.get('/api/relatorio-modelos/meta')).json;
+    assert.ok(meta.padrao.estrutura.length >= 8);
+    const ck = (await admin.post('/api/checklists', { nome: 'Rel ' + sufixo, itens: [{ texto: 'Foto da fachada', tipo_resposta: 'foto' }] })).json;
+    const estrutura = meta.padrao.estrutura.map((x) => (x.tipo === 'checklist' ? { ...x, ativo: false } : x));
+    estrutura.splice(1, 0, { tipo: 'texto', titulo: 'Escopo', ativo: true, texto: 'Escopo de {cliente}' });
+    const r = await admin.post('/api/relatorio-modelos', { nome: 'Modelo ' + sufixo, padrao: true, checklist_ids: [ck.id], modelo: { ...meta.padrao, estrutura, evidencias: { colunas: 3, excluir: ['__geral__'] } } });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const g = (await admin.get('/api/relatorio-modelos/' + r.json.id)).json;
+    assert.deepEqual(g.checklist_ids, [ck.id]);
+    assert.equal(g.modelo.estrutura[1].titulo, 'Escopo');
+    assert.equal(g.modelo.evidencias.colunas, 3);
+    assert.equal(g.modelo.estrutura.find((x) => x.tipo === 'checklist').ativo, false);
+    const pv = await fetch(BASE + '/api/relatorio-modelos/previa', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: BASE, Cookie: admin.cookie() }, body: JSON.stringify({ modelo: g.modelo }) }).catch(() => null);
+    if (pv) assert.equal(pv.status, 200);
+    const ev = (await admin.get(`/api/enderecos/${end.id}/evidencias`)).json;
+    assert.ok(Array.isArray(ev.tarefas) && ev.endereco.id === end.id);
+    assert.equal((await admin.del('/api/relatorio-modelos/' + r.json.id)).status, 200);
   });
 
   await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
