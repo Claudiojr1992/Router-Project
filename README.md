@@ -641,6 +641,13 @@ As ações menos usadas da lista de endereços (alterar ou excluir os listados, 
 - **Assinatura do cliente genérica**: "Responsável pelo recebimento (cliente)" com nome, cargo/matrícula e data em branco; quando o cliente assina pelo link, a assinatura digital entra no lugar.
 - Onde cadastrar: **logo** em Empresas (PNG/JPG, reduzido no navegador); **analista projetista** e **relatório elaborado por** no contrato (Cadastro e endereços → Contratos). O responsável pela implantação é o técnico da atividade. Migração `020_relatorio_entrega.sql`.
 
+## Carimbo nas fotos do app
+
+- Ao tirar a foto, o app grava na própria imagem um carimbo como o das câmeras de obra: dia da semana, data e hora, endereço do local, coordenadas (graus, minutos e segundos), altitude e precisão do GPS (quando o aparelho informa), o nome da unidade e um mini mapa com o alfinete.
+- Com internet, o endereço vem do serviço de mapas pelo ponto do GPS (`/api/mobile/local`); sem internet, usa o endereço cadastrado da atividade e o carimbo sai sem o mapa.
+- Endereço, altitude e precisão também ficam gravados com a foto (migração `021_foto_carimbo.sql`) e aparecem na legenda das evidências do relatório.
+- O técnico pode desligar o carimbo na tela da atividade ("Carimbar data, hora, endereço e mapa na foto").
+
 ## Vercel + Supabase
 
 O mesmo código roda no Vercel como uma função só (`api/index.js`), com o banco no Supabase.

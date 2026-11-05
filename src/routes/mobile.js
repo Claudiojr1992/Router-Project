@@ -190,6 +190,12 @@ module.exports = (app) => {
     return { resultados };
   });
 
+  // Endereço do ponto onde o técnico está (carimbo da foto). Sem serviço de mapas, devolve vazio e o app usa o endereço da atividade.
+  app.get('/api/mobile/local', interno, async (req) => {
+    const lat = v.num(req.query.lat, 'Latitude', { min: -90, max: 90 }), lon = v.num(req.query.lon, 'Longitude', { min: -180, max: 180 });
+    try { return { endereco: await require('../geocodificar').reverso(lat, lon) }; } catch (_) { return { endereco: null }; }
+  });
+
   // Foto de evidência (enviada em base64, já comprimida no celular)
   app.post('/api/mobile/fotos', { limit: 12 * 1024 * 1024 }, interno, async (req) => {
     const b = req.body;
@@ -211,10 +217,12 @@ module.exports = (app) => {
       }
       const tirada = b.tirada_em && !Number.isNaN(Date.parse(b.tirada_em)) ? new Date(b.tirada_em).toISOString() : null;
       const r = await c.query(
-        `INSERT INTO evidencias (client_id, tarefa_id, item_id, usuario_id, legenda, mime, tamanho, conteudo, lat, lon, tirada_em)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (client_id) DO NOTHING RETURNING id`,
+        `INSERT INTO evidencias (client_id, tarefa_id, item_id, usuario_id, legenda, mime, tamanho, conteudo, lat, lon, tirada_em, altitude, precisao, local_texto)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (client_id) DO NOTHING RETURNING id`,
         [clientId, tarefaId, itemId, req.user.id, v.str(b.legenda, 'a legenda', { max: 300, opcional: true }), mime, buf.length, buf,
-          v.num(b.lat, 'Latitude', { min: -90, max: 90, opcional: true }), v.num(b.lon, 'Longitude', { min: -180, max: 180, opcional: true }), tirada]);
+          v.num(b.lat, 'Latitude', { min: -90, max: 90, opcional: true }), v.num(b.lon, 'Longitude', { min: -180, max: 180, opcional: true }), tirada,
+          v.num(b.altitude, 'Altitude', { min: -500, max: 9000, opcional: true }), v.num(b.precisao, 'Precisão', { min: 0, max: 100000, opcional: true }),
+          v.str(b.local_texto, 'o local', { max: 300, opcional: true })]);
       const id = r.rows.length ? r.rows[0].id : (await c.query(`SELECT id FROM evidencias WHERE client_id = $1`, [clientId])).rows[0].id;
       if (itemId) {
         await c.query(

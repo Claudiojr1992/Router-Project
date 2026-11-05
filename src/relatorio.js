@@ -59,7 +59,7 @@ async function carregar(tarefaId) {
          LEFT JOIN checklist_respostas r ON r.item_id = i.id AND r.tarefa_id = $2
          LEFT JOIN usuarios u ON u.id = r.usuario_id
         WHERE i.checklist_id = $1 ORDER BY i.ordem, i.id`, [t.checklist_id, tarefaId]) : [],
-    db.many(`SELECT ev.id, ev.item_id, ev.legenda, ev.mime, ev.conteudo, ev.lat, ev.lon, ev.tirada_em, ev.criado_em, i.texto AS item, u.nome AS usuario
+    db.many(`SELECT ev.id, ev.item_id, ev.legenda, ev.mime, ev.conteudo, ev.lat, ev.lon, ev.local_texto, ev.altitude, ev.tirada_em, ev.criado_em, i.texto AS item, u.nome AS usuario
                FROM evidencias ev LEFT JOIN checklist_itens i ON i.id = ev.item_id LEFT JOIN usuarios u ON u.id = ev.usuario_id
               WHERE ev.tarefa_id = $1 ORDER BY ev.item_id NULLS LAST, ev.criado_em LIMIT 60`, [tarefaId]),
     db.many(`SELECT ev.tipo, ev.detalhe, ev.criado_em, u.nome AS usuario FROM tarefa_eventos ev LEFT JOIN usuarios u ON u.id = ev.usuario_id
@@ -325,7 +325,7 @@ async function desenhar(dados) {
             const s = Math.min((fw - 12) / img.width, (fh - 12) / img.height), w = img.width * s, h = img.height * s;
             page.drawImage(img, { x: x + (fw - w) / 2, y: y - fh + (fh - h) / 2, width: w, height: h });
           } else page.drawText('Imagem em formato não suportado no PDF', { x: x + 10, y: y - fh / 2, size: 8, font: F, color: C.muted });
-          const leg = [f.legenda, dataHora(f.tirada_em || f.criado_em), f.usuario, f.lat != null ? `${(+f.lat).toFixed(5)}, ${(+f.lon).toFixed(5)}` : ''].filter(Boolean).join(' · ');
+          const leg = [f.legenda, dataHora(f.tirada_em || f.criado_em), f.usuario, f.local_texto || (f.lat != null ? `${(+f.lat).toFixed(5)}, ${(+f.lon).toFixed(5)}` : '')].filter(Boolean).join(' · ');
           quebra(leg, FI, 7.5, fw).slice(0, 2).forEach((l, n) => page.drawText(l, { x, y: y - fh - 11 - n * 9.5, size: 7.5, font: FI, color: C.muted }));
         }
         y -= fh + 32;

@@ -151,7 +151,8 @@
         try {
           const r = await api('/mobile/fotos', { method: 'POST', body: {
             client_id: m.client_id, tarefa_id: m.tarefa_id, item_id: m.item_id || null, legenda: m.legenda || null,
-            mime: reg.blob.type || 'image/jpeg', base64: await blobBase64(reg.blob), lat: m.lat ?? null, lon: m.lon ?? null, tirada_em: new Date(m.ts).toISOString() } });
+            mime: reg.blob.type || 'image/jpeg', base64: await blobBase64(reg.blob), lat: m.lat ?? null, lon: m.lon ?? null, tirada_em: new Date(m.ts).toISOString(),
+            altitude: m.altitude ?? null, precisao: m.precisao ?? null, local_texto: m.local_texto || null } });
           await idb.del('fotos', m.client_id);
           fotosPend = fotosPend.filter((x) => x.client_id !== m.client_id);
           const l = B && B.fotos[m.tarefa_id]; const f = l && l.find((x) => x.client_id === m.client_id);
@@ -380,7 +381,8 @@
         ${secPatrimonio(t)}
         <div class="sec">Fotos da atividade (${fotos.filter((f) => !f.item_id).length})</div>
         <div class="card pad"><div class="thumbs" style="margin-top:0">${thumbs(fotos.filter((f) => !f.item_id))}${botaoCam('')}</div>
-          <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:.88rem;color:var(--muted)"><input type="checkbox" id="gps" ${meta.gps !== false ? 'checked' : ''}> Guardar a localização nas fotos</label></div>
+          <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:.88rem;color:var(--muted)"><input type="checkbox" id="gps" ${meta.gps !== false ? 'checked' : ''}> Guardar a localização nas fotos</label>
+          <label style="display:flex;gap:8px;align-items:center;margin-top:6px;font-size:.88rem;color:var(--muted)"><input type="checkbox" id="carimbo" ${meta.carimbo !== false ? 'checked' : ''}> Carimbar data, hora, endereço e mapa na foto</label></div>
         <div class="sec">Comentário</div>
         <div class="card pad"><textarea class="in" id="coment" style="margin-top:0" placeholder="Ex.: gerente pediu para voltar amanhã às 8h"></textarea>
           <button class="btn block" style="margin-top:8px" id="envComent">Adicionar comentário</button></div>`,
@@ -414,6 +416,7 @@
     ligarPatrimonio(t, () => telaTarefa(id));
     $$('img.thumb').forEach((im) => (im.onclick = () => verFoto(im)));
     $('#gps').onchange = async (e) => { meta.gps = e.target.checked; await salvarMeta(); };
+    $('#carimbo').onchange = async (e) => { meta.carimbo = e.target.checked; await salvarMeta(); };
     $('#relPdf').onclick = (e) => {
       if (!navigator.onLine) { e.preventDefault(); toast('O relatório precisa de internet para ser gerado.'); return; }
       if (pendentes()) toast('Há itens ainda não enviados: o relatório mostra só o que já chegou ao servidor.');
@@ -477,32 +480,122 @@
   }
 
   // Comprime a foto no aparelho (máx. 1600 px, JPEG 80%) antes de guardar
-  async function comprimir(file) {
+  async function lerImagem(file) {
     let bmp;
     try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (_) { bmp = null; }
-    if (!bmp) {
-      bmp = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
-    }
+    if (!bmp) bmp = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+    return bmp;
+  }
+  async function comprimir(bmp, carimbo) {
     const max = 1600; const w = bmp.width, h = bmp.height; const k = Math.min(1, max / Math.max(w, h));
     const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
-    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    return new Promise((res) => c.toBlob((b) => res(b || file), 'image/jpeg', 0.8));
+    const g = c.getContext('2d');
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    if (carimbo) carimbar(g, c.width, c.height, carimbo);
+    return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('falha ao gerar a imagem'))), 'image/jpeg', 0.82));
   }
-  // Localização é opcional: nunca segura a foto por mais de 3 s (nem se o pedido de permissão ficar aberto)
+
+  // ---------- Carimbo da foto: data e hora, endereço, coordenadas, altitude e mini mapa (como as câmeras de obra) ----------
+  const DIAS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+  const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const p2 = (n) => String(n).padStart(2, '0');
+  const dataLonga = (d) => `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+  const gms = (v, pos, neg) => { const a = Math.abs(v); const g = Math.floor(a); const m = Math.floor((a - g) * 60); const s2 = Math.round(((a - g) * 60 - m) * 60); return `${g}°${p2(m)}'${p2(s2 === 60 ? 59 : s2)}"${v >= 0 ? pos : neg}`; };
+  async function enderecoDoPonto(pos) {
+    if (!navigator.onLine) return null;
+    try {
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 4500);
+      const r = await fetch(`/api/mobile/local?lat=${pos.lat.toFixed(6)}&lon=${pos.lon.toFixed(6)}`, { credentials: 'same-origin', signal: ctl.signal });
+      clearTimeout(tm);
+      return r.ok ? (await r.json()).endereco : null;
+    } catch (_) { return null; }
+  }
+  // Mini mapa: 2x2 imagens do mapa de ruas (nível 16) centradas no ponto; sem internet, não entra
+  async function imagemDeBlob(bl) {
+    try { return await createImageBitmap(bl); } catch (_) { /* SVG e outros: via <img> */ }
+    return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('imagem')); i.src = URL.createObjectURL(bl); });
+  }
+  async function miniMapa(pos) {
+    if (!navigator.onLine) return null;
+    try {
+      const z = 16, n = 2 ** z, rad = pos.lat * Math.PI / 180;
+      const fx = ((pos.lon + 180) / 360) * n, fy = ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n;
+      const x0 = Math.floor(fx - 0.5), y0 = Math.floor(fy - 0.5);
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 5000);
+      const imgs = await Promise.all([[0, 0], [1, 0], [0, 1], [1, 1]].map(async ([dx, dy]) => {
+        const r = await fetch(`/tiles/${z}/${x0 + dx}/${y0 + dy}.png`, { credentials: 'same-origin', signal: ctl.signal });
+        if (!r.ok) throw new Error('mapa');
+        return { dx, dy, img: await imagemDeBlob(await r.blob()) };
+      }));
+      clearTimeout(tm);
+      const c = document.createElement('canvas'); c.width = c.height = 512;
+      const g = c.getContext('2d');
+      for (const t2 of imgs) g.drawImage(t2.img, t2.dx * 256, t2.dy * 256, 256, 256);
+      return { canvas: c, px: (fx - x0) * 256, py: (fy - y0) * 256 };
+    } catch (_) { return null; }
+  }
+  function carimbar(g, W, H, { quando, local, pos, mapa, unidade }) {
+    const u = Math.min(W, H) / 100; // unidade relativa ao tamanho da foto
+    const m = 2.2 * u, pad = 2.4 * u, raio = 1.6 * u;
+    const fT = 3.9 * u, fL = 2.9 * u, fS = 2.6 * u;
+    const ladoMapa = mapa ? Math.min(25 * u, H * 0.25) : 0;
+    const larg = W - 2 * m - (mapa ? ladoMapa + 1.4 * u : 0);
+    const quebra = (txt, font, maxW) => { g.font = font; const out = []; let l = ''; for (const w of String(txt).split(/\s+/)) { const t2 = l ? l + ' ' + w : w; if (g.measureText(t2).width <= maxW || !l) l = t2; else { out.push(l); l = w; } } if (l) out.push(l); return out; };
+    const FT = `600 ${fT}px system-ui, -apple-system, Roboto, sans-serif`, FL = `400 ${fL}px system-ui, -apple-system, Roboto, sans-serif`, FS = `500 ${fS}px system-ui, -apple-system, Roboto, sans-serif`;
+    const lt = quebra(dataLonga(quando), FT, larg - 2 * pad);
+    const ll = local ? quebra(local, FL, larg - 2 * pad).slice(0, 3) : [];
+    const coord = pos ? `◎ ${gms(pos.lat, 'N', 'S')} ${gms(pos.lon, 'E', 'W')}${pos.altitude != null ? `   ▲ ${String(Math.round(pos.altitude * 10) / 10).replace('.', ',')}m` : ''}${pos.precisao != null ? `   ± ${Math.round(pos.precisao)}m` : ''}` : 'Sem localização do GPS';
+    const lu = unidade ? (() => { g.font = FS; let t2 = unidade; while (t2.length > 4 && g.measureText(t2).width > larg - 2 * pad) t2 = t2.slice(0, -2); return [t2 === unidade ? t2 : t2.replace(/[\s·-]+$/, '') + '…']; })() : [];
+    const altura = pad * 2 + lt.length * fT * 1.22 + (ll.length ? 0.6 * u + ll.length * fL * 1.3 : 0) + 0.9 * u + fS * 1.3 + (lu.length ? fS * 1.35 : 0);
+    const y0 = H - m - Math.max(altura, ladoMapa);
+    const caixa = (x, y, w, h) => { g.beginPath(); g.moveTo(x + raio, y); g.arcTo(x + w, y, x + w, y + h, raio); g.arcTo(x + w, y + h, x, y + h, raio); g.arcTo(x, y + h, x, y, raio); g.arcTo(x, y, x + w, y, raio); g.closePath(); };
+    const yb = H - m - altura;
+    g.save();
+    caixa(m, yb, larg, altura); g.fillStyle = 'rgba(40,40,40,0.72)'; g.fill();
+    g.fillStyle = '#fff'; g.textBaseline = 'top';
+    let y = yb + pad;
+    g.font = FT; for (const l of lt) { g.fillText(l, m + pad, y); y += fT * 1.22; }
+    if (ll.length) { y += 0.6 * u; g.font = FL; g.fillStyle = 'rgba(255,255,255,0.92)'; for (const l of ll) { g.fillText(l, m + pad, y); y += fL * 1.3; } }
+    y += 0.9 * u; g.font = FS; g.fillStyle = '#fff'; g.fillText(coord, m + pad, y); y += fS * 1.3;
+    if (lu.length) { g.fillStyle = 'rgba(255,255,255,0.75)'; g.fillText(lu[0], m + pad, y + 0.2 * u); }
+    if (mapa) {
+      const xm = W - m - ladoMapa, ym = H - m - ladoMapa;
+      caixa(xm, ym, ladoMapa, ladoMapa); g.save(); g.clip();
+      const meia = 128; // recorte de 256 px em volta do ponto
+      g.drawImage(mapa.canvas, mapa.px - meia, mapa.py - meia, meia * 2, meia * 2, xm, ym, ladoMapa, ladoMapa);
+      g.restore();
+      caixa(xm, ym, ladoMapa, ladoMapa); g.lineWidth = 0.35 * u; g.strokeStyle = 'rgba(255,255,255,0.9)'; g.stroke();
+      // alfinete vermelho no centro
+      const cx = xm + ladoMapa / 2, cy = ym + ladoMapa / 2, r = 2.6 * u;
+      g.beginPath(); g.arc(cx, cy - r * 1.6, r, Math.PI * 0.85, Math.PI * 0.15); g.lineTo(cx, cy); g.closePath(); g.fillStyle = '#E53935'; g.fill();
+      g.beginPath(); g.arc(cx, cy - r * 1.6, r * 0.42, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill();
+      g.font = `500 ${1.8 * u}px system-ui, sans-serif`; g.fillStyle = 'rgba(0,0,0,0.6)'; g.textBaseline = 'bottom'; g.fillText('© OpenStreetMap', xm + 0.8 * u, ym + ladoMapa - 0.5 * u);
+    }
+    g.restore();
+    return y0;
+  }
+  // Localização é opcional: nunca segura a foto por mais de 4 s (nem se o pedido de permissão ficar aberto)
   const posicao = () => new Promise((res) => {
     if (meta.gps === false || !navigator.geolocation) return res(null);
-    const t = setTimeout(() => res(null), 3000);
-    navigator.geolocation.getCurrentPosition((p) => { clearTimeout(t); res({ lat: p.coords.latitude, lon: p.coords.longitude }); },
-      () => { clearTimeout(t); res(null); }, { timeout: 3000, maximumAge: 120000, enableHighAccuracy: true });
+    const t = setTimeout(() => res(null), 4000);
+    navigator.geolocation.getCurrentPosition((p) => { clearTimeout(t); res({ lat: p.coords.latitude, lon: p.coords.longitude, altitude: p.coords.altitude, precisao: p.coords.accuracy }); },
+      () => { clearTimeout(t); res(null); }, { timeout: 4000, maximumAge: 60000, enableHighAccuracy: true });
   });
 
   async function novaFoto(t, itemId, file) {
     if (!file) return;
     toast('Guardando foto…');
     try {
-      const [blob, pos] = await Promise.all([comprimir(file), posicao()]);
+      const quando = new Date(file.lastModified && Math.abs(Date.now() - file.lastModified) < 10 * 60000 ? file.lastModified : Date.now());
+      const [bmp, pos] = await Promise.all([lerImagem(file), posicao()]);
+      // carimbo: endereço do ponto (com internet) ou o endereço da atividade (sem internet), coordenadas, altitude e mapa
+      const endAtv = [[t.logradouro, t.bairro].filter(Boolean).join(' - '), `${t.municipio} - ${t.uf}`, t.cep, 'Brasil'].filter(Boolean).join(', ');
+      const local = meta.carimbo === false ? null : (pos ? await enderecoDoPonto(pos) : null) || endAtv;
+      const mapa = meta.carimbo !== false && pos ? await miniMapa(pos) : null;
+      const blob = await comprimir(bmp, meta.carimbo === false ? null : { quando, local, pos, mapa, unidade: `${t.endereco}${t.codigo ? ' · ' + t.codigo : ''}` });
       const m = { client_id: uuid(), tarefa_id: t.id, item_id: itemId, legenda: itemId ? (B.checklists[t.checklist_id].itens.find((i) => i.id === itemId) || {}).texto : null,
-        lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, ts: Date.now(), usuario_id: B.usuario.id };
+        lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, altitude: pos && pos.altitude != null ? Math.round(pos.altitude * 10) / 10 : null,
+        precisao: pos && pos.precisao != null ? Math.round(pos.precisao * 10) / 10 : null, local_texto: local, ts: quando.getTime(), usuario_id: B.usuario.id };
       await idb.put('fotos', { ...m, blob });
       fotosPend.push(m);
       urls.set(m.client_id, URL.createObjectURL(blob));

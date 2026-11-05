@@ -107,4 +107,31 @@ function iniciarRotina() {
   setInterval(rodar, 10 * 60000).unref();
 }
 
-module.exports = { localizar, geocodificarEndereco, processar, iniciarRotina, LIGADO };
+// Endereço do ponto (usado no carimbo da foto do app). Guarda em memória por ~11 m (4 casas decimais).
+const cacheReverso = new Map();
+async function reverso(lat, lon) {
+  if (!LIGADO) return null;
+  const k = `${(+lat).toFixed(4)},${(+lon).toFixed(4)}`;
+  if (cacheReverso.has(k)) return cacheReverso.get(k);
+  const p = fila.then(async () => {
+    const dt = Date.now() - ultima;
+    if (dt < 1100) await esperar(1100 - dt);
+    ultima = Date.now();
+    const qs = new URLSearchParams({ format: 'jsonv2', lat: String(lat), lon: String(lon), zoom: '18', addressdetails: '1', ...(CONTATO ? { email: CONTATO } : {}) });
+    const r = await requisicao(`${BASE}/reverse?${qs}`, { headers: { 'User-Agent': 'RoutProject/1.0 (gestao de implantacao)', 'Accept-Language': 'pt-BR' }, timeout: 8000 });
+    if (r.status >= 400 || !r.json || r.json.error) return null;
+    const a = r.json.address || {};
+    const rua = [a.road || a.pedestrian || a.footway || a.square, a.house_number].filter(Boolean).join(', ');
+    const bairro = a.suburb || a.neighbourhood || a.quarter || a.city_district || '';
+    const cidade = a.city || a.town || a.village || a.municipality || '';
+    const uf = (a['ISO3166-2-lvl4'] || '').replace(/^BR-/, '') || a.state || '';
+    const partes = [[rua, bairro].filter(Boolean).join(' - '), [cidade, uf].filter(Boolean).join(' - '), a.postcode, a.country].filter(Boolean);
+    return partes.length ? partes.join(', ') : (r.json.display_name || null);
+  });
+  fila = p.catch(() => {});
+  const txt = await p;
+  if (txt) { cacheReverso.set(k, txt); if (cacheReverso.size > 2000) cacheReverso.delete(cacheReverso.keys().next().value); }
+  return txt;
+}
+
+module.exports = { localizar, geocodificarEndereco, processar, iniciarRotina, reverso, LIGADO };
