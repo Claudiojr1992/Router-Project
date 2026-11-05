@@ -6,6 +6,7 @@ const { requer, ESCRITORIO, INTERNOS, pode, podeAcao } = require('../auth');
 const { gerarRelatorio } = require('../relatorio');
 const { conferirConclusao } = require('../predecessora');
 const { criarExtra } = require('../extras');
+const { aplicarPlano } = require('../plano');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATUS = ['a_fazer', 'em_andamento', 'aguardando', 'concluida'];
@@ -59,6 +60,22 @@ async function aplicarAcao(c, user, a) {
   // atividade extra incluída no campo (ex.: escavação, poste): nasce com o técnico como responsável
   if (a.tipo === 'extra') {
     await criarExtra(c, user, { endereco_id: a.endereco_id, atividade_id: a.atividade_id, quantidade: a.quantidade, motivo: a.motivo, em: a.em });
+    return;
+  }
+  // concluir o endereço pelo app: o técnico já concluiu as atividades dele (ações de status antes desta na fila);
+  // se não sobrou nenhuma atividade aberta no endereço (de ninguém), o endereço vira "Concluída" na data do aparelho
+  if (a.tipo === 'concluir_endereco') {
+    const eid = v.id(a.endereco_id, 'Endereço');
+    const meu = pode(user, 'projetos', 'editar') || pode(user, 'delegadas', 'editar') ||
+      (user.pessoa_id && (await c.query(`SELECT 1 FROM tarefas WHERE endereco_id = $1 AND responsavel_id = $2 LIMIT 1`, [eid, user.pessoa_id])).rows.length);
+    if (!meu) throw new HttpError(403, 'Você não tem atividades neste endereço');
+    const abertas = (await c.query(
+      `SELECT a.nome FROM tarefas t JOIN atividades a ON a.id = t.atividade_id AND a.ativo WHERE t.endereco_id = $1 AND t.status <> 'concluida' ORDER BY a.nome`, [eid])).rows;
+    if (abertas.length) return; // ainda há atividades de outros técnicos: o endereço conclui quando a última for concluída
+    const dia = /^\d{4}-\d{2}-\d{2}$/.test(String(a.dia || '')) ? a.dia : (a.em && !Number.isNaN(Date.parse(a.em)) ? new Date(a.em) : new Date()).toISOString().slice(0, 10);
+    const e = (await c.query(`SELECT concluido_em FROM enderecos WHERE id = $1`, [eid])).rows[0];
+    if (!e) throw new HttpError(404, 'Endereço não encontrado');
+    if (!e.concluido_em) await aplicarPlano(c, eid, { concluido_em: dia });
     return;
   }
   const tarefaId = v.id(a.tarefa_id, 'Atividade');

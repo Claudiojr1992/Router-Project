@@ -3,7 +3,7 @@
 // e as fotos ficam guardadas até a conexão voltar. A sincronização envia fotos primeiro, depois as ações.
 (() => {
   'use strict';
-  const VERSAO = '1.5.0';
+  const VERSAO = '1.6.0';
   const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -70,6 +70,9 @@
   let erros = [];
   let syncing = false;
   let filtro = 'abertas';
+  let busca = ''; // pesquisa da tela Atividades
+  const norm = (x) => String(x ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const casa = (txt, q) => { const ts = norm(q).split(/\s+/).filter(Boolean); const n = norm(txt); return ts.every((t) => n.includes(t)); };
   const urls = new Map(); // client_id -> objectURL das fotos locais
 
   async function carregarLocal() {
@@ -94,6 +97,11 @@
     return bundle;
   }
   function aplicarLocal(bundle, a) {
+    if (a.tipo === 'concluir_endereco') {
+      const ts = bundle.tarefas.filter((x) => x.endereco_id === a.endereco_id);
+      if (ts.every((x) => x.status === 'concluida')) ts.forEach((x) => { x.endereco_status = 'Concluída'; });
+      return;
+    }
     const t = bundle.tarefas.find((x) => x.id === a.tarefa_id);
     if (!t) return;
     if (a.tipo === 'status') {
@@ -271,15 +279,26 @@
           <div class="kpi"><b>${ts.filter((t) => t.status === 'concluida').length}</b><span>Concluídas (7 dias)</span></div>
         </div>
         <div class="seg" role="group" aria-label="Filtro"><button aria-pressed="${filtro === 'abertas'}" data-f="abertas">Em aberto</button><button aria-pressed="${filtro === 'feitas'}" data-f="feitas">Concluídas</button></div>
+        <div class="busca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input class="in" type="search" id="busca" placeholder="Pesquisar endereço, código, cidade ou atividade" aria-label="Pesquisar atividades" value="${esc(busca)}" autocomplete="off" enterkeyhint="search"></div>
+        <div class="empty" id="semres" hidden>Nada encontrado para essa pesquisa.</div>
         ${bannerInstalar()}
         ${erros.length ? `<a class="errbox" href="#/sync" style="text-decoration:none;color:inherit">${erros.length} item(ns) não foram aceitos pelo servidor. Toque para revisar.</a>` : ''}
         ${!B.usuario.pessoa_id ? '<div class="warnbox">Seu usuário ainda não está ligado a um técnico. Peça ao administrador.</div>' : ''}
-        ${grupos.size ? [...grupos.values()].map((g) => { const e = g[0]; return `<a class="card end" href="#/e/${e.endereco_id}">
+        ${grupos.size ? [...grupos.values()].map((g) => { const e = g[0]; const txt = [e.endereco, e.codigo, e.municipio, e.uf, e.cliente, e.logradouro, e.bairro, ...g.map((t) => t.atividade)].join(' '); return `<a class="card end" href="#/e/${e.endereco_id}" data-busca="${esc(txt)}">
             <h2>${esc(e.endereco)}</h2><div class="meta">${esc(e.municipio)}/${esc(e.uf)} · ${e.cameras} câmeras · ${esc(e.cliente)}</div>${barraAvanco(avancoEnd(e))}
             <div class="acts">${g.map((t) => `<div class="act"><span class="n">${esc(t.atividade)}</span><span class="pill ${t.status}"><i></i>${ST[t.status]}</span></div>`).join('')}</div></a>`; }).join('')
           : `<div class="empty">${filtro === 'abertas' ? 'Nenhuma atividade com você agora.<br>Puxe novidades em Sincronizar.' : 'Nada concluído nos últimos 7 dias.'}</div>`}`,
     });
     $$('[data-f]').forEach((b) => (b.onclick = () => { filtro = b.dataset.f; telaHoje(); }));
+    const filtrar = () => {
+      let n = 0;
+      $$('[data-busca]').forEach((c) => { const ok = casa(c.dataset.busca, busca); c.hidden = !ok; if (ok) n++; });
+      const sr = $('#semres'); if (sr) sr.hidden = !(busca.trim() && grupos.size && !n);
+    };
+    const bi = $('#busca');
+    bi.oninput = () => { busca = bi.value; filtrar(); };
+    filtrar();
     ligarBanner();
   }
 
@@ -301,14 +320,75 @@
           ${avancoEnd(e) ? `<dt>Conclusão</dt><dd>${barraAvanco(avancoEnd(e))}</dd>` : ''}
           ${e.aeroporto ? `<dt>Aeroporto</dt><dd>${esc(e.aeroporto)}${e.km_aeroporto ? ` · ${e.km_aeroporto} km` : ''}</dd>` : ''}
         </dl><a class="btn block" style="margin-top:12px" href="${mapa}" target="_blank" rel="noopener">Abrir no mapa</a></div>
+        ${secConcluirEnd(e, ts)}
         <div class="sec">Suas atividades aqui</div>
-        ${ts.map((t) => { const p = progresso(t); const nf = (B.fotos[t.id] || []).length; return `<a class="card end" href="#/t/${t.id}">
+        ${ts.length > 3 ? `<div class="busca"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input class="in" type="search" id="buscaAtv" placeholder="Pesquisar atividade" aria-label="Pesquisar atividade neste endereço" autocomplete="off" enterkeyhint="search"></div>` : ''}
+        ${ts.map((t) => { const p = progresso(t); const nf = (B.fotos[t.id] || []).length; return `<a class="card end" href="#/t/${t.id}" data-batv="${esc(`${t.atividade} ${ST[t.status]}`)}">
           <div class="act"><span class="n"><b>${esc(t.atividade)}</b>${t.extra ? ` <span class="xtag">Extra ×${String(t.quantidade).replace('.', ',')}</span>` : ''}</span><span class="pill ${t.status}"><i></i>${ST[t.status]}</span></div>
           <div class="meta">${p ? `Checklist ${p.feitos}/${p.total} · ` : ''}${nf} foto(s)${t.prevista_inicio ? ` · previsto ${fmtData(t.prevista_inicio)}` : ''}</div>
           ${p ? `<div class="bar" style="margin-top:8px"><i style="width:${p.total ? Math.round(p.feitos / p.total * 100) : 0}%"></i></div>` : ''}</a>`; }).join('')}
         ${secExtra(e, ts)}`,
     });
     ligarExtra(e, ts, () => telaEndereco(id));
+    ligarConcluirEnd(e, ts, () => telaEndereco(id));
+    const ba = $('#buscaAtv');
+    if (ba) ba.oninput = () => $$('[data-batv]').forEach((c) => { c.hidden = !casa(c.dataset.batv, ba.value); });
+  }
+
+  // ---------- Concluir o endereço: conclui as atividades abertas do técnico ali e, se não sobrar nenhuma de ninguém, o endereço ----------
+  function situacaoEnd(e, ts) {
+    const abertas = ts.filter((t) => t.status !== 'concluida');
+    const bloq = abertas.map((t) => {
+      const pr = predPendente(t);
+      if (pr && !abertas.some((x) => x.atividade === pr.nome)) return { t, motivo: `depende de "${pr.nome}"` };
+      const p = progresso(t);
+      if (p && p.faltam.length) return { t, motivo: `checklist: falta${p.faltam.length > 1 ? 'm' : ''} ${p.faltam.length} item(ns) obrigatório(s)` };
+      return null;
+    }).filter(Boolean);
+    const a = avancoEnd(e);
+    // atividades de outros técnicos ainda abertas no endereço (o total vem do servidor; as minhas estão no aparelho)
+    const outras = a ? Math.max(0, (a.total - a.feitas) - abertas.length) : 0;
+    return { abertas, bloq, outras, concluido: e.endereco_status === 'Concluída' };
+  }
+  function secConcluirEnd(e, ts) {
+    const s = situacaoEnd(e, ts);
+    if (s.concluido) return '<div class="okbox">Endereço concluído.</div>';
+    if (!s.abertas.length && !s.outras) return `<button class="btn ok block" style="margin-top:12px" id="concEnd">Concluir endereço</button>`;
+    if (!s.abertas.length) return `<div class="warnbox">Suas atividades aqui estão concluídas. Faltam ${s.outras} atividade(s) de outros técnicos para o endereço ser concluído.</div>`;
+    return `<button class="btn ok block" style="margin-top:12px" id="concEnd">${s.outras ? `Concluir minhas ${s.abertas.length} atividade(s)` : 'Concluir endereço'}</button>
+      ${s.bloq.length ? `<p class="muted" style="font-size:.82rem;margin:6px 2px 0">Antes de concluir: ${s.bloq.map((b) => `<b>${esc(b.t.atividade)}</b> (${esc(b.motivo)})`).join('; ')}.</p>` : ''}
+      ${s.outras ? `<p class="muted" style="font-size:.82rem;margin:6px 2px 0">Há ${s.outras} atividade(s) de outros técnicos aqui: o endereço conclui quando a última for concluída.</p>` : ''}`;
+  }
+  function ligarConcluirEnd(e, ts, redesenhar) {
+    const b = $('#concEnd'); if (!b) return;
+    b.onclick = async () => {
+      const s = situacaoEnd(e, ts);
+      if (s.bloq.length) {
+        toast(`Resolva antes: ${s.bloq[0].t.atividade} (${s.bloq[0].motivo})`);
+        location.hash = `#/t/${s.bloq[0].t.id}`; return;
+      }
+      const semFoto = s.abertas.filter((t) => t.evidencia && !(B.fotos[t.id] || []).length);
+      const msg = [
+        s.abertas.length ? `Concluir ${s.abertas.length} atividade(s): ${s.abertas.map((t) => t.atividade).join(', ')}.` : '',
+        s.outras ? 'O endereço continua aberto até os outros técnicos concluírem.' : 'O endereço será marcado como concluído hoje.',
+        semFoto.length ? `\n\nAtenção: sem foto em ${semFoto.map((t) => t.atividade).join(', ')}.` : '',
+      ].filter(Boolean).join(' ');
+      if (!confirm(msg)) return;
+      // a ordem respeita as predecessoras: quem é pré-requisito conclui primeiro
+      const ordem = [], resto = s.abertas.slice();
+      while (resto.length) {
+        const i = resto.findIndex((t) => !t.pred_nome || !resto.some((x) => x !== t && x.atividade === t.pred_nome));
+        ordem.push(...resto.splice(i < 0 ? 0 : i, 1));
+      }
+      for (const t of ordem) await enfileirar({ tipo: 'status', tarefa_id: t.id, status: 'concluida' });
+      if (!s.outras) {
+        const d = new Date(); const dia = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        await enfileirar({ tipo: 'concluir_endereco', endereco_id: e.endereco_id, dia });
+      }
+      toast(s.outras ? 'Suas atividades foram concluídas' : navigator.onLine ? 'Endereço concluído' : 'Endereço concluído: será enviado na próxima sincronização');
+      redesenhar();
+    };
   }
 
   // ---------- Atividade extra no endereço (ex.: escavação, poste): o técnico inclui no campo, com quantidade e motivo ----------

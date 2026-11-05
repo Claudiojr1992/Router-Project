@@ -208,6 +208,29 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     assert.ok((await admin.get(`/api/tarefas/${tarefa.id}/eventos`)).json.some((e) => /Foto excluída/.test(e.detalhe)));
   });
 
+  await t.test('concluir endereço pelo app: só conclui quando não sobra atividade aberta', async () => {
+    const c = (await admin.post('/api/clientes', { nome: 'Concluir ' + sufixo })).json;
+    const k = (await admin.post(`/api/clientes/${c.id}/contratos`, { numero: 'C-' + sufixo, tipo: 'principal' })).json;
+    const e = (await admin.post(`/api/contratos/${k.id}/enderecos`, { nome: 'Sala 1', municipio: 'Fortaleza', uf: 'CE', cameras: 1 })).json;
+    const id = () => require('crypto').randomUUID();
+    const dia = new Date().toISOString().slice(0, 10);
+    const acao = async (a) => (await admin.post('/api/mobile/acoes', { acoes: [{ id: id(), ...a }] })).json.resultados[0];
+    const ts = (await admin.get('/api/projetos/' + k.id)).json.enderecos.find((x) => x.id === e.id).tarefas;
+    assert.ok(ts.length >= 1);
+    // com atividade aberta: não conclui (e não dá erro)
+    assert.equal((await acao({ tipo: 'concluir_endereco', endereco_id: e.id, dia })).ok, true);
+    let end_ = (await admin.get(`/api/contratos/${k.id}/enderecos`)).json.find((x) => x.id === e.id);
+    assert.notEqual(end_.status, 'Concluída');
+    // atividades sem checklist obrigatório: conclui uma a uma e depois o endereço
+    const livres = [];
+    for (const t of ts) { const r = await acao({ tipo: 'status', tarefa_id: t.id, status: 'concluida' }); if (r.ok) livres.push(t.id); }
+    const faltam = ts.length - livres.length;
+    await acao({ tipo: 'concluir_endereco', endereco_id: e.id, dia });
+    end_ = (await admin.get(`/api/contratos/${k.id}/enderecos`)).json.find((x) => x.id === e.id);
+    assert.equal(end_.status === 'Concluída', faltam === 0, JSON.stringify({ status: end_.status, faltam }));
+    await admin.post(`/api/clientes/${c.id}/excluir`, { confirmacao: 'Concluir ' + sufixo });
+  });
+
   await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
     const r = await admin.put('/api/enderecos/' + end.id, { nome: 'Agência Teste', logradouro: 'Rua Nova, 10', municipio: 'Fortaleza', uf: 'CE', cameras: 6 });
     assert.equal(r.status, 200);

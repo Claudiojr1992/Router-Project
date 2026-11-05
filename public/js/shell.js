@@ -22,6 +22,7 @@ const Shell = (() => {
     escudo: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
     hist: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
     doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+    busca: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
     mini: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 10l-2 2 2 2"/>',
     voltar: '<path d="M15 18l-6-6 6-6"/>',
     emp: '<rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/>',
@@ -76,7 +77,7 @@ const Shell = (() => {
           <button class="burger" type="button" aria-label="Abrir menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
           <button class="voltar" type="button" id="voltarPg" title="Voltar para a tela anterior" aria-label="Voltar" hidden>${svg('voltar')}</button>
           <div style="min-width:0"><h1>${RP.esc(title)}</h1><div class="sub" id="sub">${RP.esc(sub)}</div></div>
-          <span class="spacer"></span><div class="row" id="actions"></div></header>`}
+          <span class="spacer"></span><div class="row" id="tbuscaw"></div><div class="row" id="actions"></div></header>`}
         <main class="content" id="content" ${full ? 'style="padding:0;gap:0;flex:1"' : ''}></main>
       </div></div>`;
     document.title = `${title} · RoutProject`;
@@ -122,7 +123,43 @@ const Shell = (() => {
       RP.$('#content').innerHTML = '<div class="card empty">Seu perfil não tem acesso a esta tela.</div>';
       return new Promise(() => {});
     }
+    if (!full) buscaDaTela();
     return { user, content: RP.$('#content'), actions: RP.$('#actions'), sub: RP.$('#sub') };
+  }
+
+  // Pesquisa em qualquer tela: filtra as linhas das tabelas e os cartões da lista pelo texto digitado.
+  // Some sozinha nas telas que já têm a própria busca ou que não têm lista.
+  function buscaDaTela() {
+    const content = RP.$('#content'), actions = RP.$('#tbuscaw'); // fora de #actions: as telas reescrevem os botões
+    if (!content || !actions) return;
+    const ALVO = 'tbody tr, .ccard, [data-busca]';
+    const box = document.createElement('div');
+    box.className = 'tbusca';
+    box.hidden = true;
+    box.innerHTML = `${svg('busca')}<input class="input" type="search" id="tbusca" placeholder="Pesquisar nesta tela" aria-label="Pesquisar nesta tela" autocomplete="off"><span class="tbusca-n" id="tbusca-n" aria-live="polite"></span>`;
+    actions.prepend(box);
+    const inp = box.querySelector('input'), n = box.querySelector('#tbusca-n');
+    const norm = (x) => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    let aplicando = false;
+    function aplicar() {
+      aplicando = true;
+      const propria = content.querySelector('input[aria-label^="Buscar"], input[type="search"]');
+      const itens = RP.$$(ALVO, content).filter((el) => !el.closest('thead'));
+      box.hidden = !!propria || !itens.length;
+      const termos = norm(inp.value).split(/\s+/).filter(Boolean);
+      let vis = 0;
+      for (const el of itens) {
+        const ok = !termos.length || box.hidden || termos.every((t) => norm(el.textContent + ' ' + RP.$$('input,select,textarea', el).map((x) => x.value).join(' ')).includes(t));
+        el.classList.toggle('tb-oculto', !ok);
+        if (ok) vis++;
+      }
+      n.textContent = termos.length && !box.hidden ? `${vis} de ${itens.length}` : '';
+      setTimeout(() => { aplicando = false; }, 0);
+    }
+    inp.addEventListener('input', aplicar);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Escape') { inp.value = ''; aplicar(); } });
+    let t = null;
+    new MutationObserver(() => { if (aplicando) return; clearTimeout(t); t = setTimeout(aplicar, 60); }).observe(content, { childList: true, subtree: true });
   }
 
   // ---------- Abas das telas abertas (ficam salvas neste navegador) e voltar ----------

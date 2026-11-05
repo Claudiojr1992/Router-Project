@@ -132,3 +132,8 @@ textarea.in{min-height:80px;resize:vertical}
 .avm{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:.82rem;color:var(--muted)}
 .avm .bar{flex:1;max-width:160px;margin:0}
 .avm b{color:var(--accent)}
+/* pesquisa */
+.busca{position:relative;margin-top:10px}
+.busca svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--muted);pointer-events:none}
+.busca .in{margin-top:0;padding-left:38px}
+.okbox{background:color-mix(in srgb,var(--ok) 14%,transparent);border-radius:12px;padding:10px 12px;font-size:.9rem;margin-top:12px;font-weight:600}

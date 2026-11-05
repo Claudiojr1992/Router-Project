@@ -595,3 +595,12 @@ a.pjedit{text-decoration:none}
 .avc small{color:var(--muted)}
 .avb{display:inline-block;height:6px;border-radius:999px;background:var(--line);overflow:hidden}
 .avb i{display:block;height:100%;background:var(--c);border-radius:999px}
+
+/* pesquisa em qualquer tela (Shell) */
+.tbusca{position:relative;display:flex;align-items:center;gap:8px}
+.tbusca>svg{position:absolute;left:10px;width:16px;height:16px;color:var(--muted);pointer-events:none}
+.tbusca .input{padding-left:32px;width:240px;max-width:52vw}
+.tbusca-n{font-size:.8rem;color:var(--muted);white-space:nowrap}
+.tbusca-n:empty{display:none}
+.tb-oculto{display:none!important}
+#tbuscaw:empty{display:none}
