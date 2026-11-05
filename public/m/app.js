@@ -3,7 +3,7 @@
 // e as fotos ficam guardadas até a conexão voltar. A sincronização envia fotos primeiro, depois as ações.
 (() => {
   'use strict';
-  const VERSAO = '1.6.0';
+  const VERSAO = '1.6.1';
   const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -72,7 +72,24 @@
   let filtro = 'abertas';
   let busca = ''; // pesquisa da tela Atividades
   const norm = (x) => String(x ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const casa = (txt, q) => { const ts = norm(q).split(/\s+/).filter(Boolean); const n = norm(txt); return ts.every((t) => n.includes(t)); };
+  // nota da pesquisa: 2 = frase inteira (ex.: "anexo 2" em "ANEXO 2 - 1 ANDAR"), 1 = todas as palavras, 0 = não casa.
+  // números valem inteiros: "2" não casa com "20" nem com "12"
+  const limpa = (x) => norm(x).replace(/[^a-z0-9]+/g, ' ').trim();
+  const temTermo = (n, t) => (/^\d+$/.test(t) ? new RegExp(`(^|\\D)${t}(\\D|$)`).test(n) : n.includes(t));
+  const nota = (txt, q) => {
+    const f = limpa(q); if (!f) return 2;
+    const n = ' ' + limpa(txt) + ' ';
+    if (new RegExp(`(^|[^a-z0-9])${f.replace(/ /g, ' ')}([^0-9]|$)`).test(n)) return 2;
+    return f.split(' ').every((t) => temTermo(n, t)) ? 1 : 0;
+  };
+  // aplica a pesquisa numa lista: se alguém casa a frase inteira, mostra só esses
+  const filtrarLista = (els, attr, q) => {
+    const ns = els.map((c) => nota(c.dataset[attr], q));
+    const min = ns.some((x) => x === 2) ? 2 : 1;
+    let vis = 0;
+    els.forEach((c, i) => { c.hidden = ns[i] < min; if (!c.hidden) vis++; });
+    return vis;
+  };
   const urls = new Map(); // client_id -> objectURL das fotos locais
 
   async function carregarLocal() {
@@ -293,7 +310,7 @@
     $$('[data-f]').forEach((b) => (b.onclick = () => { filtro = b.dataset.f; telaHoje(); }));
     const filtrar = () => {
       let n = 0;
-      $$('[data-busca]').forEach((c) => { const ok = casa(c.dataset.busca, busca); c.hidden = !ok; if (ok) n++; });
+      n = filtrarLista($$('[data-busca]'), 'busca', busca);
       const sr = $('#semres'); if (sr) sr.hidden = !(busca.trim() && grupos.size && !n);
     };
     const bi = $('#busca');
@@ -333,7 +350,7 @@
     ligarExtra(e, ts, () => telaEndereco(id));
     ligarConcluirEnd(e, ts, () => telaEndereco(id));
     const ba = $('#buscaAtv');
-    if (ba) ba.oninput = () => $$('[data-batv]').forEach((c) => { c.hidden = !casa(c.dataset.batv, ba.value); });
+    if (ba) ba.oninput = () => filtrarLista($$('[data-batv]'), 'batv', ba.value);
   }
 
   // ---------- Concluir o endereço: conclui as atividades abertas do técnico ali e, se não sobrar nenhuma de ninguém, o endereço ----------

@@ -146,13 +146,15 @@ const Shell = (() => {
       const propria = content.querySelector('input[aria-label^="Buscar"], input[type="search"]');
       const itens = RP.$$(ALVO, content).filter((el) => !el.closest('thead'));
       box.hidden = !!propria || !itens.length;
-      const termos = norm(inp.value).split(/\s+/).filter(Boolean);
+      const f = norm(inp.value).replace(/[^a-z0-9]+/g, ' ').trim();
+      const termos = f ? f.split(' ') : [];
+      const texto = (el) => ' ' + norm(el.textContent + ' ' + RP.$$('input,select,textarea', el).map((x) => x.value).join(' ')).replace(/[^a-z0-9]+/g, ' ') + ' ';
+      const tem = (txt, t) => (/^\d+$/.test(t) ? new RegExp(`(^|\\D)${t}(\\D|$)`).test(txt) : txt.includes(t));
+      // frase inteira primeiro (ex.: "anexo 2" não traz "anexo 3 - 2 andar"); números valem inteiros
+      const notas = itens.map((el) => { if (!f || box.hidden) return 2; const txt = texto(el); return new RegExp(`(^|[^a-z0-9])${f}([^0-9]|$)`).test(txt) ? 2 : termos.every((t) => tem(txt, t)) ? 1 : 0; });
+      const min = notas.some((x) => x === 2) ? 2 : 1;
       let vis = 0;
-      for (const el of itens) {
-        const ok = !termos.length || box.hidden || termos.every((t) => norm(el.textContent + ' ' + RP.$$('input,select,textarea', el).map((x) => x.value).join(' ')).includes(t));
-        el.classList.toggle('tb-oculto', !ok);
-        if (ok) vis++;
-      }
+      itens.forEach((el, i) => { const ok = notas[i] >= min; el.classList.toggle('tb-oculto', !ok); if (ok) vis++; });
       n.textContent = termos.length && !box.hidden ? `${vis} de ${itens.length}` : '';
       setTimeout(() => { aplicando = false; }, 0);
     }
