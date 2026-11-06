@@ -503,9 +503,10 @@ function rpCadastro(o) {
     tfix = {},
     dfix = {},
     dfim = {};
+  const usarDatas = cfg.eqd !== false; // "Datas do cadastro: desligado" = vale só a equipe; o mês segue a meta
   us.forEach((u) => {
     const t = u.tm && u.tm <= k ? u.tm : null;
-    if (u.di) {
+    if (u.di && usarDatas) {
       const m = u.di.slice(0, 7);
       dfix[u.id] = u.di;
       if (u.df) dfim[u.id] = u.df;
@@ -514,7 +515,7 @@ function rpCadastro(o) {
     } else if (t) tfix[u.id] = t;
   });
   const dated = us
-    .filter((u) => u.di)
+    .filter((u) => u.di && usarDatas)
     .sort((a, b) => (a.di < b.di ? -1 : a.di > b.di ? 1 : 0))
     .map((u) => u.id);
   // meta dos meses com endereços do cadastro: mês de etapa = todos os endereços dele (etapa + data); outros meses = no mínimo os que têm data
@@ -530,11 +531,12 @@ function rpCadastro(o) {
     });
   D.units.forEach((u) => {
     if (u.ok) return;
-    let m = u.di ? u.di.slice(0, 7) : (u.et && em[u.et]) || null;
+    const di = usarDatas ? u.di : null;
+    let m = di ? di.slice(0, 7) : (u.et && em[u.et]) || null;
     if (!m) return;
     if (m < m0) m = m0;
     cnt[m] = (cnt[m] || 0) + 1;
-    if (u.di) dc[m] = (dc[m] || 0) + 1;
+    if (di) dc[m] = (dc[m] || 0) + 1;
   });
   Object.keys(cnt).forEach((m) => {
     if (uo[m] != null) return;
@@ -550,6 +552,34 @@ function rpCadastro(o) {
     dfim,
     order: dated.concat((o.order || []).filter((id) => !dfix[id])),
   });
+}
+// Meta do mês que não fecha porque as datas de início do cadastro prendem endereços em outros meses
+function avisoMeta(P_, rows) {
+  const hint = document.getElementById('m-hint');
+  if (!hint) return;
+  let av = document.getElementById('m-aviso');
+  if (!av) {
+    av = document.createElement('div');
+    av.id = 'm-aviso';
+    av.className = 'maviso';
+    hint.after(av);
+  }
+  const mk = month || (P_.months[0] && P_.months[0].key);
+  const pm = mk && P_.months.find((m) => m.key === mk);
+  const q = pm && pm.quota;
+  const nMes = rows.filter((r) => r.mon === mk).length;
+  const presos = plan === 'M' && q && nMes < q && cfg.eqc !== false && cfg.eqd !== false
+    ? D.units.filter((u) => !u.ok && u.di && u.di.slice(0, 7) > mk).length
+    : 0;
+  if (!presos) { av.hidden = true; av.innerHTML = ''; return; }
+  av.hidden = false;
+  av.innerHTML = `<b>${fm(mk)}: ${nMes} de ${q} agências da meta.</b> ${presos} endereço(s) têm data de início no cadastro em meses seguintes e ficam presos a essas datas. <button type="button" class="ufb etb" id="m-seguir">Seguir a meta (desligar as datas do cadastro)</button>`;
+  document.getElementById('m-seguir').onclick = () => {
+    cfg.eqd = false;
+    saveCfg();
+    render();
+    toast('Datas de início do cadastro desligadas: os meses seguem a meta. As equipes do cadastro continuam valendo.');
+  };
 }
 // Atrasada: devia ter começado (início previsto passou e não está em execução) ou devia ter terminado a instalação
 const RP_HOJE = E.parse(new Date().toLocaleDateString('sv'));
@@ -939,6 +969,7 @@ function render() {
   document.getElementById('d-hint').textContent = month
     ? `Total de agências planejadas em ${fm(month)}: ${mr.length}`
     : `Todos os meses: ${mr.length} agências`;
+  avisoMeta(P_, rows);
   // KPIs
   const inPlan = new Set(rows.map((r) => r.id));
   const scope = sel.size ? D.units.filter((u) => inPlan.has(u.id)) : D.units;
@@ -1123,6 +1154,22 @@ function render() {
           render();
         };
         cu.prepend(cb);
+        const nDi = D.units.filter((u) => !u.ok && u.di).length;
+        if (on && nDi) {
+          const db = document.createElement('button');
+          db.type = 'button';
+          const dOn = cfg.eqd !== false;
+          db.className = 'ufb etb' + (dOn ? ' on' : '');
+          db.setAttribute('aria-pressed', String(dOn));
+          db.title = 'Ligado: cada endereço entra no mês e no dia de início do cadastro. Desligado: mantém só a equipe do cadastro e os meses seguem a meta.';
+          db.textContent = dOn ? 'Datas de início do cadastro: ligado' : 'Datas de início do cadastro: desligado (segue a meta)';
+          db.onclick = () => {
+            cfg.eqd = !dOn;
+            saveCfg();
+            render();
+          };
+          cb.after(db);
+        }
         if (on) {
           const nd = D.units.filter((u) => !u.ok && u.di).length,
             nt = D.units.filter((u) => !u.ok && u.tm).length,
@@ -1134,7 +1181,7 @@ function render() {
             nt +
             ' endereço(s) com equipe e ' +
             nd +
-            ' com data de início: entram na equipe e no dia informados.' +
+            (cfg.eqd !== false ? ' com data de início: entram na equipe e no dia informados.' : ' com data de início (datas desligadas: os meses seguem a meta).') +
             (ac
               ? ' <span class="warn">' +
                 ac +
@@ -2261,6 +2308,7 @@ async function saveCfg() {
     etc: !!cfg.etc,
     tat: !!cfg.tat,
     eqc: cfg.eqc !== false,
+    eqd: cfg.eqd !== false,
     semdesl: cfg.semdesl || [],
     estEntrega: !!cfg.estEntrega,
     encaixar: !!cfg.encaixar,
@@ -2350,6 +2398,7 @@ if ((cfg.states || []).length) fitSel();
           etc: !!v.etc,
           tat: !!v.tat,
           eqc: v.eqc !== false,
+          eqd: v.eqd !== false,
           semdesl: Array.isArray(v.semdesl) ? v.semdesl : [],
           estEntrega: !!v.estEntrega,
           encaixar: !!v.encaixar,
