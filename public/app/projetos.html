@@ -16,6 +16,7 @@
 <script>
 const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
 const ICO_LIXO = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>';
+const ICO_PDF = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>';
 const ICO_ZIP = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>';
 const ICO_REL = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>';
 const TIPO = { tecnico: ['Técnico', 'tec'], coordenacao: ['Coordenação', 'coo'], administrativo: ['Administrativo', 'adm'] };
@@ -209,7 +210,7 @@ function render() {
       <div class="scroll" style="max-height:calc(100vh - 330px)">
         <div class="matrix" style="grid-template-columns:${cols};min-width:${590 + (temExtras ? 200 : 0) + proj.atividades.length * 150}px">
           <div class="mh">Endereço</div><div class="mh" title="Quantidade de cada item do contrato neste endereço · role para o lado">Itens do contrato</div><div class="mh" title="Subir os ativos para o Zabbix depois que todas as atividades forem concluídas">Monitoramento</div>${temExtras ? '<div class="mh" title="Atividades incluídas só neste endereço (ex.: escavação, poste), com quantidade e motivo">Extras do endereço</div>' : ''}${proj.atividades.map((a) => `<div class="mh" title="${RP.esc(a.nome)}">${RP.esc(a.curto || a.nome)}</div>`).join('')}
-          ${ends.map((e) => `<div class="mc"><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.municipio)}/${e.uf} · ${RP.esc(e.status)}</div>${(() => { const n = e.tarefas.reduce((s2, t) => s2 + (t.fotos || 0), 0); return n ? `<button type="button" class="evbtn" data-ev="${e.id}" title="Baixar as fotos e os relatórios deste endereço num arquivo .zip">${ICO_ZIP} Evidências · ${n} foto${n > 1 ? 's' : ''}</button>` : ''; })()}<div style="margin:4px 0 2px">${RP.avanco(e.tarefas.filter((t) => t.status === 'concluida').length, e.tarefas.length)}</div>${e.etapa ? `<div style="font-size:.78rem;color:var(--accent)">${RP.esc(e.etapa)}${e.ordem_etapa ? ' · ' + e.ordem_etapa + 'º' : ''} · início ${RP.fmtData(e.etapa_inicio)}</div>` : ''}</div>
+          ${ends.map((e) => `<div class="mc"><b>${RP.esc(e.nome)}</b><div class="muted" style="font-size:.8rem">${RP.esc(e.municipio)}/${e.uf} · ${RP.esc(e.status)}</div>${(() => { const n = e.tarefas.reduce((s2, t) => s2 + (t.fotos || 0), 0); return n ? `<button type="button" class="evbtn" data-ev="${e.id}" title="Baixar as fotos e os relatórios deste endereço num arquivo .zip">${ICO_ZIP} Evidências · ${n} foto${n > 1 ? 's' : ''}</button><button type="button" class="evbtn" data-rc="${e.id}" title="Um único PDF com o relatório de todas as atividades e evidências deste endereço">${ICO_PDF} Relatório compilado</button>` : ''; })()}<div style="margin:4px 0 2px">${RP.avanco(e.tarefas.filter((t) => t.status === 'concluida').length, e.tarefas.length)}</div>${e.etapa ? `<div style="font-size:.78rem;color:var(--accent)">${RP.esc(e.etapa)}${e.ordem_etapa ? ' · ' + e.ordem_etapa + 'º' : ''} · início ${RP.fmtData(e.etapa_inicio)}</div>` : ''}</div>
             <div class="mc"><div class="itroll" tabindex="0" aria-label="Itens do contrato em ${RP.esc(e.nome)}">${itensCt.length ? itensCt.map((i) => { const n = (e.itens || {})[i.id] || 0; return `<span class="itq${n ? '' : ' z'}" title="${RP.esc(i.nome)}: ${n}"><b>${RP.fmtN(n)}</b>${RP.esc(i.nome)}</span>`; }).join('') : `<span class="itq"><b>${RP.fmtN(e.cameras)}</b>Câmeras</span>`}</div></div>
             <div class="mc">${monChip(e)}</div>
             ${temExtras ? `<div class="mc"><div class="xcol">${e.tarefas.filter((t) => t.extra).map((t) => `<button type="button" class="xchip ${t.status}" data-t="${t.id}" title="${RP.esc(t.atividade)} · ${ST[t.status]}${t.responsavel ? ' · ' + RP.esc(t.responsavel) : ''}${t.motivo ? ' · ' + RP.esc(t.motivo) : ''}"><i></i><span class="n">${RP.esc(t.curto || t.atividade)}</span><small>×${fmtQ(t.quantidade)}</small></button>`).join('')}${podeExtra ? `<button type="button" class="xadd" data-xadd="${e.id}">+ Extra</button>` : ''}</div></div>` : ''}
@@ -234,6 +235,7 @@ function render() {
   RP.$$('[data-xadd]', S.content).forEach((b) => (b.onclick = () => novaExtra(+b.dataset.xadd)));
   RP.$$('[data-mon]', S.content).forEach((b) => (b.onclick = () => monitorar(+b.dataset.mon)));
   RP.$$('[data-ev]', S.content).forEach((b) => (b.onclick = () => baixarEvidencias([+b.dataset.ev], b)));
+  RP.$$('[data-rc]', S.content).forEach((b) => (b.onclick = () => relatorioCompilado(+b.dataset.rc, b)));
   RP.$('#evall')?.addEventListener('click', (ev) => {
     const ids = ends.filter((e) => e.tarefas.some((t) => t.fotos)).map((e) => e.id);
     if (!ids.length) return RP.toast('Nenhum endereço com fotos nestes filtros');
@@ -241,6 +243,57 @@ function render() {
     if (!confirm(`Baixar as evidências de ${ids.length} endereço(s), ${nf} foto(s), com os relatórios em PDF? Pode levar alguns minutos.`)) return;
     baixarEvidencias(ids, ev.currentTarget);
   });
+}
+
+// Relatório compilado do endereço: um PDF só, com a capa, o relatório de cada atividade com evidência e o termo de aceite no fim.
+// Montado no navegador (cada parte vem do servidor separada), para não esbarrar no limite de tamanho de resposta.
+function carregarPdfLib() {
+  if (window.PDFLib) return Promise.resolve(window.PDFLib);
+  return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = '/vendor/pdf-lib.min.js'; sc.onload = () => res(window.PDFLib); sc.onerror = () => rej(new Error('Não foi possível carregar o gerador de PDF')); document.head.appendChild(sc); });
+}
+async function relatorioCompilado(eid, botao) {
+  if (relatorioCompilado.rodando) return RP.toast('Já há um relatório sendo gerado');
+  relatorioCompilado.rodando = true;
+  const txt = botao ? botao.innerHTML : '';
+  const aviso = (m) => { if (botao) botao.textContent = m; };
+  if (botao) botao.disabled = true;
+  try {
+    aviso('Lendo as atividades…');
+    const L = await carregarPdfLib();
+    const d = await RP.api(`/enderecos/${eid}/evidencias`);
+    const ts = d.tarefas.filter((t) => t.fotos.length);
+    if (!ts.length) throw new Error('Este endereço ainda não tem evidências');
+    const out = await L.PDFDocument.create();
+    for (const [i, t] of ts.entries()) {
+      aviso(`Atividade ${i + 1} de ${ts.length}…`);
+      const sem = [i > 0 ? 'objetivo' : '', i < ts.length - 1 ? 'termo' : ''].filter(Boolean).join(',');
+      const q = new URLSearchParams({ capa: i === 0 ? '1' : '0', sempag: '1' });
+      if (sem) q.set('sem', sem);
+      if (i === 0 && ts.length > 1) q.set('sub', 'Compilado de todas as atividades do endereço');
+      const r = await fetch(`/api/tarefas/${t.id}/relatorio.pdf?${q}`, { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(`Não foi possível gerar o relatório de "${t.atividade}"`);
+      const doc = await L.PDFDocument.load(await r.arrayBuffer());
+      (await out.copyPages(doc, doc.getPageIndices())).forEach((pg) => out.addPage(pg));
+    }
+    // numeração do arquivo inteiro, no quadro do cabeçalho (a capa não tem cabeçalho)
+    aviso('Numerando as páginas…');
+    const F = await out.embedFont(L.StandardFonts.Helvetica), FB = await out.embedFont(L.StandardFonts.HelveticaBold);
+    const pgs = out.getPages(), tot = pgs.length;
+    const W = 595.28 - 48, lw = 78, c1 = 0.42 * (W - lw), c2 = 0.2 * (W - lw), xc = 24 + lw + c1 + c2 + 6, yy = 841.89 - 30 - 32 - 13;
+    const cinza = L.rgb(0.36, 0.42, 0.41);
+    pgs.forEach((pg, i) => {
+      const nn = `Página ${i + 1} de ${tot}`; // rodapé
+      pg.drawText(nn, { x: 595.28 - 48 - F.widthOfTextAtSize(nn, 7.5), y: 22, size: 7.5, font: F, color: cinza });
+      if (i === 0) return; // capa: sem quadro de cabeçalho
+      pg.drawText('Página: ', { x: xc, y: yy, size: 8, font: FB, color: L.rgb(0.08, 0.13, 0.12) });
+      pg.drawText(`${i + 1} de ${tot}`, { x: xc + FB.widthOfTextAtSize('Página: ', 8), y: yy, size: 8, font: F, color: L.rgb(0.08, 0.13, 0.12) });
+    });
+    out.setTitle(`Relatório compilado · ${d.endereco.nome}`);
+    const blob = new Blob([await out.save()], { type: 'application/pdf' });
+    Zip.baixar(blob, `Relatorio_compilado_${Zip.nome(`${d.endereco.codigo ? d.endereco.codigo + '_' : ''}${d.endereco.nome}`, 80)}.pdf`);
+    RP.toast(`Relatório compilado pronto: ${ts.length} atividade(s), ${tot} página(s)`);
+  } catch (er) { RP.toast(er.message); }
+  finally { relatorioCompilado.rodando = false; if (botao) { botao.disabled = false; botao.innerHTML = txt; } }
 }
 
 // Evidências em .zip montado no navegador: uma pasta por endereço e por atividade, com as fotos e o relatório PDF

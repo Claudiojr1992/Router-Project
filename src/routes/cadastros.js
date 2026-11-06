@@ -207,13 +207,15 @@ module.exports = (app) => {
        LEFT JOIN enderecos e ON e.contrato_id = ct.id
       GROUP BY c.id ORDER BY c.nome`));
 
+  // empresa responsável pelo projeto (logo do relatório quando o contrato não tem empresa própria)
+  const empresaDoProjeto = (b) => (b.empresa_id === '' || b.empresa_id == null ? null : v.id(b.empresa_id, 'Empresa'));
   app.post('/api/clientes', escrita, async (req) => db.one(
-    `INSERT INTO clientes (nome, razao_social, cnpj, segmento, contato_nome, contato_email, contato_fone, observacoes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`, clienteBody(req.body)));
+    `INSERT INTO clientes (nome, razao_social, cnpj, segmento, contato_nome, contato_email, contato_fone, observacoes, empresa_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [...clienteBody(req.body), empresaDoProjeto(req.body || {})]));
 
   app.get('/api/clientes/:id', leitura, async (req) => {
     const id = v.id(req.params.id);
-    const cliente = await db.one(`SELECT * FROM clientes WHERE id = $1`, [id]);
+    const cliente = await db.one(`SELECT c.*, (SELECT nome FROM empresas em WHERE em.id = c.empresa_id) AS empresa FROM clientes c WHERE c.id = $1`, [id]);
     if (!cliente) throw new HttpError(404, 'Cliente não encontrado');
     cliente.contratos = await db.many(
       `SELECT ct.*, count(e.id)::int AS enderecos, COALESCE(sum(e.cameras),0)::int AS cameras,
@@ -226,8 +228,9 @@ module.exports = (app) => {
 
   app.put('/api/clientes/:id', escrita, async (req) => {
     const r = await db.one(
-      `UPDATE clientes SET nome=$1, razao_social=$2, cnpj=$3, segmento=$4, contato_nome=$5, contato_email=$6, contato_fone=$7, observacoes=$8
-        WHERE id = $9 RETURNING *`, [...clienteBody(req.body), v.id(req.params.id)]);
+      `UPDATE clientes SET nome=$1, razao_social=$2, cnpj=$3, segmento=$4, contato_nome=$5, contato_email=$6, contato_fone=$7, observacoes=$8,
+              empresa_id = CASE WHEN $11 THEN $10::bigint ELSE empresa_id END
+        WHERE id = $9 RETURNING *`, [...clienteBody(req.body), v.id(req.params.id), empresaDoProjeto(req.body || {}), Object.prototype.hasOwnProperty.call(req.body || {}, 'empresa_id')]);
     if (!r) throw new HttpError(404, 'Cliente não encontrado');
     return r;
   });

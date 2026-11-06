@@ -295,7 +295,15 @@ module.exports = (app) => {
   app.get('/api/tarefas/:id/relatorio.pdf', interno, async (req, res) => {
     const id = v.id(req.params.id);
     await db.tx((c) => tarefaDoUsuario(c, req.user, id));
-    const r = await gerarRelatorio(id);
+    // compilado do endereço: ?capa=0|1&sem=objetivo,termo&sub=texto&sempag=1
+    const q = req.query || {};
+    const op = q.capa != null || q.sem || q.sub || q.sempag ? {
+      semPagina: q.sempag === '1',
+      capa: q.capa === '0' ? false : q.capa === '1' ? true : undefined,
+      sem: q.sem ? String(q.sem).split(',').map((x) => x.trim()).filter(Boolean) : undefined,
+      subtitulo: q.sub ? String(q.sub).slice(0, 160) : undefined,
+    } : null;
+    const r = await gerarRelatorio(id, op);
     if (!r) throw new HttpError(404, 'Atividade não encontrada');
     const baixar = req.query.baixar === '1';
     res.writeHead(200, {

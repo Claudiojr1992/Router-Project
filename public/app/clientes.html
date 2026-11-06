@@ -822,11 +822,14 @@ function contrato(c) {
 function dadosCampos(x) {
   return `${f('k-nome', 'Nome do cliente', x.nome, 'required')}${f('k-rs', 'Razão social', x.razao_social)}
     <div class="row"><div style="flex:1">${f('k-cnpj', 'CNPJ', x.cnpj)}</div><div style="flex:1">${f('k-seg', 'Segmento', x.segmento)}</div></div>
+    <div class="field"><label for="k-emp">Empresa responsável pelo projeto</label><select class="input" id="k-emp"><option value="">— nenhuma —</option>${empresas.map((e) => `<option value="${e.id}" ${+x.empresa_id === e.id ? 'selected' : ''}>${RP.esc(e.nome)}</option>`).join('')}</select>
+      <div class="muted" style="font-size:.82rem;margin-top:4px">O logo dela sai na capa e no cabeçalho dos relatórios deste projeto (contratos com empresa própria usam a do contrato). Cadastre logos em Empresas.</div></div>
     ${f('k-cn', 'Contato (nome)', x.contato_nome)}<div class="row"><div style="flex:1">${f('k-ce', 'E-mail do contato', x.contato_email, 'type="email"')}</div><div style="flex:1">${f('k-cf', 'Telefone', x.contato_fone)}</div></div>
     <div class="field"><label for="k-obs">Observações</label><textarea class="input" id="k-obs">${RP.esc(x.observacoes || '')}</textarea></div>`;
 }
 const dadosBody = (el) => ({ nome: val(el, 'k-nome'), razao_social: val(el, 'k-rs'), cnpj: val(el, 'k-cnpj'), segmento: val(el, 'k-seg'),
-  contato_nome: val(el, 'k-cn'), contato_email: val(el, 'k-ce'), contato_fone: val(el, 'k-cf'), observacoes: val(el, 'k-obs') });
+  contato_nome: val(el, 'k-cn'), contato_email: val(el, 'k-ce'), contato_fone: val(el, 'k-cf'), observacoes: val(el, 'k-obs'),
+  ...(RP.$('#k-emp', el) ? { empresa_id: RP.$('#k-emp', el).value || null } : {}) });
 
 function tabDados(el) {
   el.innerHTML = `<div class="body" style="max-width:720px"><div class="alert err" hidden></div>${dadosCampos(cli)}<div class="row" style="gap:8px"><button class="btn primary" id="sv">Salvar dados</button><button class="btn" id="hist">Histórico de alterações</button></div></div>`;

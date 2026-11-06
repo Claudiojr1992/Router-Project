@@ -41,7 +41,7 @@ async function carregar(tarefaId) {
        FROM tarefas t JOIN atividades a ON a.id = t.atividade_id
        LEFT JOIN checklists ck ON ck.id = a.checklist_id
        JOIN enderecos e ON e.id = t.endereco_id JOIN contratos ct ON ct.id = e.contrato_id JOIN clientes cl ON cl.id = ct.cliente_id
-       LEFT JOIN empresas emp ON emp.id = ct.empresa_id
+       LEFT JOIN empresas emp ON emp.id = COALESCE(ct.empresa_id, cl.empresa_id)
        LEFT JOIN pessoas p ON p.id = t.responsavel_id
       WHERE t.id = $1`, [tarefaId]);
   if (!t) return null;
@@ -181,15 +181,22 @@ function normalizarModelo(m) {
   return out;
 }
 
-async function gerarRelatorio(tarefaId) {
+// opcoes (relatório compilado do endereço): { capa: false, sem: ['objetivo','termo'], subtitulo }
+async function gerarRelatorio(tarefaId, opcoes = null) {
   const dados = await carregar(tarefaId);
   if (!dados) return null;
+  if (opcoes) dados.opcoes = opcoes;
   return desenhar(dados);
 }
 
 async function desenhar(dados) {
   const { t, itens, fotos, eventos, assinatura } = dados;
   const md = normalizarModelo(t.modelo || MODELO_PADRAO);
+  const op = dados.opcoes || {};
+  if (op.capa === false) md.capa = false;
+  if (op.capa === true) md.capa = true;
+  if (op.subtitulo) md.subtitulo = op.subtitulo;
+  if (Array.isArray(op.sem)) md.estrutura.forEach((sx) => { if (op.sem.includes(sx.tipo)) sx.ativo = false; });
   const corHead = (() => { const c = parseInt(md.cor.slice(1), 16); return rgb(((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255); })();
   const empresa = md.empresa || t.empresa || '';
   const execucao = t.realizada_fim || t.realizada_inicio;
@@ -258,7 +265,7 @@ async function desenhar(dados) {
   yc -= 4;
   for (const l of quebra(md.subtitulo ? resolve(md.subtitulo) : t.atividade, F, 12.5, CW - 60)) { centro(l, yc, F, 12.5, C.ink); yc -= 17; }
   yc -= 22;
-  centro(`PROJETO ${String(t.cliente || '').toUpperCase()}${t.contrato ? ' · CONTRATO ' + t.contrato : ''}`, yc, FB, 12, C.ink);
+  centro(`PROJETO ${String(t.cliente || '').toUpperCase()}`, yc, FB, 12, C.ink);
   yc -= 20;
   centro(`${t.endereco}${t.codigo ? ' · ' + t.codigo : ''} · ${t.municipio}/${t.uf}`, yc, F, 11, C.muted);
   yc -= 44;
@@ -269,10 +276,6 @@ async function desenhar(dados) {
     page.drawText(b, { x: x0 + FB.widthOfTextAtSize(a, 10.5), y: yc, size: 10.5, font: F, color: C.ink });
     yc -= 17;
   }
-  const selo = final ? 'RELATÓRIO FINAL' : 'RELATÓRIO PARCIAL · ATIVIDADE EM ANDAMENTO';
-  const sw = FB.widthOfTextAtSize(selo, 8.5) + 20;
-  page.drawRectangle({ x: (PW - sw) / 2, y: yc - 26, width: sw, height: 20, color: final ? C.ok : C.amber });
-  centro(selo, yc - 19.5, FB, 8.5, final ? C.white : C.head);
   if (empresa) centro(empresa, 70, F, 9, C.muted);
   }
 
@@ -455,17 +458,16 @@ async function desenhar(dados) {
       par(xa, top - 13, 'Projeto', String(t.cliente || '').toUpperCase(), c1);
       par(xa, top - 25, 'Unidade', `${t.endereco} · ${t.municipio}/${t.uf}`.toUpperCase(), c1);
       par(xb, top - 13, 'Versão', '1.0', c2);
-      par(xb, top - 25, 'Situação', final ? 'Final' : 'Parcial', c2);
+      par(xb, top - 25, 'Setor', 'Implantação', c2);
       par(xc, top - 13, 'Data', hoje, wc);
       par(xa, top - h2 - 13, 'Responsável', vars.responsavel, c1);
       par(xa, top - h2 - 25, 'Analista', vars.analista, c1);
-      par(xb, top - h2 - 13, 'Setor', 'Implantação', c2);
-      par(xc, top - h2 - 13, 'Página', `${idx + 1} de ${tot}`, wc);
+      if (!op.semPagina) par(xc, top - h2 - 13, 'Página', `${idx + 1} de ${tot}`, wc); // no compilado, o navegador numera o arquivo inteiro
     }
     p.drawLine({ start: { x: M, y: 34 }, end: { x: PW - M, y: 34 }, thickness: 0.5, color: C.line });
     p.drawText(limpa(`${tituloDoc} · ${t.atividade} · gerado em ${dataHora(new Date())}`).slice(0, 110), { x: M, y: 22, size: 7, font: F, color: C.muted });
     const nn = `Página ${idx + 1} de ${tot}`;
-    p.drawText(nn, { x: PW - M - F.widthOfTextAtSize(nn, 7.5), y: 22, size: 7.5, font: F, color: C.muted });
+    if (!op.semPagina) p.drawText(nn, { x: PW - M - F.widthOfTextAtSize(nn, 7.5), y: 22, size: 7.5, font: F, color: C.muted });
   });
 
   const nome = limpa(`Relatorio_${t.endereco}_${t.atividade}`).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 90) + '.pdf';
