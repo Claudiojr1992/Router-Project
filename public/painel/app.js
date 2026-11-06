@@ -432,15 +432,27 @@ cD.addEventListener('change', (e) => {
     render();
   }
 });
+// uma equipe pode receber até o total de endereços do projeto por mês
+const maxMeta = () => Math.max(1, D.units.filter((u) => !u.ok).length || D.units.length);
+mCap.max = maxMeta();
+mQ.max = maxMeta();
+// mexeu na meta: os meses passam a seguir a meta (sai do "encaixar pelo período")
+function metaFixa() {
+  if (!cfg.encaixar) return;
+  cfg.encaixar = false;
+  toast('Meses: meta fixa — cada mês recebe a meta informada');
+}
 mCap.addEventListener('change', () => {
-  const v = Math.max(0.5, Math.min(30, parseFloat(String(mCap.value).replace(',', '.')) || 4.8));
+  const v = Math.max(0.5, Math.min(maxMeta(), parseFloat(String(mCap.value).replace(',', '.')) || 4.8));
   cfg.cap = Math.round(v * 100) / 100;
+  metaFixa();
   saveCfg();
   render();
 });
 mQ.addEventListener('change', () => {
-  const v = Math.max(1, Math.min(D.units.length, parseInt(mQ.value, 10) || 24));
+  const v = Math.max(1, Math.min(maxMeta(), parseInt(mQ.value, 10) || 24));
   cfg.cap = Math.round((v / k) * 1000) / 1000;
+  metaFixa();
   saveCfg();
   render();
 });
@@ -563,6 +575,12 @@ function avisoMeta(P_, rows) {
     av.id = 'm-aviso';
     av.className = 'maviso';
     hint.after(av);
+  }
+  if (plan === 'M' && cfg.encaixar) {
+    av.hidden = false;
+    av.innerHTML = `<b>A meta não está sendo usada:</b> a regra "Meses: encaixar pelo período" está ligada, então cada mês recebe só as agências que cabem nos dias úteis. <button type="button" class="ufb etb" id="m-fixa">Usar a meta de ${quota()} por mês</button>`;
+    document.getElementById('m-fixa').onclick = () => { cfg.encaixar = false; saveCfg(); render(); };
+    return;
   }
   const mk = month || (P_.months[0] && P_.months[0].key);
   const pm = mk && P_.months.find((m) => m.key === mk);

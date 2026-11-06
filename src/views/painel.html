@@ -38,8 +38,8 @@
 <section class="cards">
   <div class="card meta" aria-labelledby="h-meta"><div class="ctitle"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg><div><h2 id="h-meta">Meta do mês</h2><div class="hint" style="margin:0">Meta exata por mês = nº de equipes × capacidade por equipe</div></div></div>
     <div class="eq"><div class="box"><span class="lbl">Equipes com rota</span><div class="v"><span class="val" id="m-k">5</span><small>equipes</small></div></div><span class="op">×</span>
-    <div class="box"><label class="lbl" for="m-cap">Capacidade por equipe</label><div class="v"><input type="number" id="m-cap" min="1" max="30" step="0.1" value="4.8"><small>agências</small></div></div><span class="op">=</span>
-    <div class="box hl"><label class="lbl" for="m-q">Meta mensal</label><div class="v"><input type="number" id="m-q" min="1" max="97" step="1" value="24"><small>agências</small></div></div></div>
+    <div class="box"><label class="lbl" for="m-cap">Capacidade por equipe</label><div class="v"><input type="number" id="m-cap" min="0.5" max="9999" step="0.1" value="4.8"><small>agências</small></div></div><span class="op">=</span>
+    <div class="box hl"><label class="lbl" for="m-q">Meta mensal</label><div class="v"><input type="number" id="m-q" min="1" max="9999" step="1" value="24"><small>agências</small></div></div></div>
     <p class="hint" id="m-hint">Todo mês recebe exatamente essa quantidade, dividida igualmente entre as equipes. Vínculos e exclusões não alteram o total.</p></div>
   <div class="card" aria-labelledby="h-conc"><div class="ctitle"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg><h2 id="h-conc">Concluído no mês</h2></div>
     <div class="donut"><svg id="donut" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Percentual concluído no mês"></svg><div class="legend" id="d-leg"></div></div>
