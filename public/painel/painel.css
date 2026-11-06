@@ -274,3 +274,4 @@ body.embutido .wrap{padding-top:0}
 body.embutido .top{justify-content:flex-end;padding:0;margin:0}
 body.embutido .top .ttl{display:none}
 body.embutido .pdfbar{flex-direction:row;align-items:center;gap:10px}
+.pane+.pane{margin-top:14px}

@@ -1,4 +1,4 @@
-// RoutProject · abas do painel (Mapa e rotas | Planejamento e regras)
+// RoutProject · painel em tela única: Planejamento e regras + Mapa e rotas
 (function () {
   // dentro do sistema (moldura), o título já aparece em cima: o painel mostra só o conteúdo
   if (window.self !== window.top || /[?&]embutido=1/.test(location.search)) document.body.classList.add('embutido');
@@ -28,7 +28,12 @@
   }));
   const r0 = render;
   render = function () { const x = r0.apply(this, arguments); try { resumo(); } catch (_) { /* ignora */ } return x; };
-  let ini = 'mapa';
-  try { ini = localStorage.getItem('rp-painel-aba') || 'mapa'; } catch (_) { /* sem armazenamento */ }
-  abrir(tabs.some((t) => t.dataset.ptab === ini) ? ini : 'mapa');
+  // tela única: planejamento e regras em cima, mapa e rotas logo abaixo (sem abas)
+  const nav = document.querySelector('.ptabs');
+  const pMapa = panes.find((p) => p.dataset.pane === 'mapa'), pPlano = panes.find((p) => p.dataset.pane === 'plano');
+  if (pMapa && pPlano) pMapa.parentNode.insertBefore(pPlano, pMapa);
+  panes.forEach((p) => (p.hidden = false));
+  if (nav) nav.remove();
+  try { localStorage.removeItem('rp-painel-aba'); } catch (_) { /* sem armazenamento */ }
+  if (window.rpMapaBase) requestAnimationFrame(() => window.rpMapaBase());
 })();
