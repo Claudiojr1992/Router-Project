@@ -231,6 +231,25 @@ test('API', { skip: !ATIVO && 'defina RUN_API_TESTS=1 e DATABASE_URL de um banco
     await admin.post(`/api/clientes/${c.id}/excluir`, { confirmacao: 'Concluir ' + sufixo });
   });
 
+  await t.test('materiais: entrada, aplicação na atividade, saldo e rastreio do lote', async () => {
+    const m = (await admin.post('/api/materiais', { nome: 'Cabo teste ' + sufixo, unidade: 'm', estoque_minimo: 10 })).json;
+    assert.ok(m.id);
+    const lote = 'LT-' + sufixo;
+    assert.equal((await admin.post('/api/materiais/movimentos', { tipo: 'entrada', material_id: m.id, quantidade: 100, lote })).status, 200);
+    const proj = (await admin.get('/api/projetos')).json[0];
+    const t = (await admin.get('/api/projetos/' + proj.id)).json.enderecos.find((e) => e.tarefas.length).tarefas[0];
+    const ap = await admin.post('/api/materiais/movimentos', { tipo: 'aplicacao', material_id: m.id, tarefa_id: t.id, quantidade: 12.5, lote });
+    assert.equal(ap.status, 200, JSON.stringify(ap.json));
+    const est = (await admin.get('/api/materiais')).json.find((x) => x.id === m.id);
+    assert.equal(+est.saldo, 87.5);
+    const r = (await admin.get('/api/materiais/rastreio?lote=' + lote)).json;
+    assert.equal(r.resumo.aplicado, 12.5);
+    assert.equal(r.resumo.enderecos, 1);
+    // aplicação sem endereço é recusada; exclusão do material com histórico só inativa
+    assert.equal((await admin.post('/api/materiais/movimentos', { tipo: 'aplicacao', material_id: m.id, quantidade: 1 })).status, 400);
+    assert.equal((await admin.del('/api/materiais/' + m.id)).json.inativado, true);
+  });
+
   await t.test('auditoria registra quem mudou o endereço, com antes e depois', async () => {
     const r = await admin.put('/api/enderecos/' + end.id, { nome: 'Agência Teste', logradouro: 'Rua Nova, 10', municipio: 'Fortaleza', uf: 'CE', cameras: 6 });
     assert.equal(r.status, 200);

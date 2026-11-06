@@ -604,3 +604,14 @@ a.pjedit{text-decoration:none}
 .tbusca-n:empty{display:none}
 .tb-oculto{display:none!important}
 #tbuscaw:empty{display:none}
+
+/* materiais */
+.matk{margin-bottom:14px}.kpi.warn b{color:var(--warn)}
+tr.inativo td{opacity:.6}
+.lnk{background:none;border:0;padding:0;color:var(--accent);font:inherit;text-decoration:underline;cursor:pointer}
+.rastro{list-style:none;margin:0;padding:0 16px 16px 30px;position:relative}
+.rastro:before{content:"";position:absolute;left:21px;top:6px;bottom:22px;width:2px;background:var(--line)}
+.rastro li{position:relative;padding:8px 0 10px 14px;border-bottom:1px solid var(--line)}
+.rastro li:before{content:"";position:absolute;left:-14px;top:14px;width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--panel)}
+.rastro li.t-entrada:before{background:var(--ok)}.rastro li.t-ajuste:before{background:var(--warn)}.rastro li.t-devolucao:before{background:var(--info)}
+.rastro .rq{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:2px}

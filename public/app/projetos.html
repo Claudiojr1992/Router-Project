@@ -245,6 +245,31 @@ function render() {
   });
 }
 
+// Material aplicado na atividade (rastreabilidade): lista e, para quem edita, registro pelo escritório
+async function materialBox(e, tid, box) {
+  if (!box) return;
+  const fQ = (n) => (+n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+  let lista, cat = [];
+  try { [lista, cat] = await Promise.all([RP.api(`/enderecos/${e.id}/materiais`), Shell.pode('projetos', 'editar') ? RP.api('/materiais') : Promise.resolve([])]); } catch (er) { box.textContent = er.message; return; }
+  const meus = lista.filter((m) => m.tarefa_id === tid);
+  box.classList.remove('muted');
+  box.innerHTML = `${meus.length ? `<table class="tbl"><thead><tr><th>Material</th><th class="num">Qtd.</th><th>Lote</th><th>Quem / quando</th><th></th></tr></thead><tbody>${meus.map((m) => `<tr><td><b>${RP.esc(m.material)}</b>${m.observacao ? `<div class="muted" style="font-size:.8rem">${RP.esc(m.observacao)}</div>` : ''}</td><td class="num">${fQ(m.quantidade)} ${RP.esc(m.unidade)}</td><td>${m.lote ? `<a href="/app/materiais.html?lote=${encodeURIComponent(m.lote)}" title="Rastrear o lote">${RP.esc(m.lote)}</a>` : '—'}</td><td>${RP.esc(m.pessoa || m.usuario || '—')}<div class="muted" style="font-size:.8rem">${RP.fmtDataHora(m.criado_em)}</div></td><td class="num">${Shell.pode('projetos', 'editar') ? `<button type="button" class="btn sm" data-mdel="${m.id}" title="Remover">Remover</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">Nenhum material registrado nesta atividade. O técnico registra pelo app, na tela da atividade.</p>'}
+    ${cat.length ? `<div class="row" style="gap:8px;margin-top:10px;align-items:flex-end;flex-wrap:wrap">
+      <div class="field" style="flex:2;min-width:180px;margin:0"><label for="dm-m">Material</label><select class="input" id="dm-m">${cat.map((m) => `<option value="${m.id}">${RP.esc(m.nome)} (${RP.esc(m.unidade)})</option>`).join('')}</select></div>
+      <div class="field" style="flex:1;min-width:90px;margin:0"><label for="dm-q">Qtd.</label><input class="input" id="dm-q" type="number" min="0" step="any"></div>
+      <div class="field" style="flex:1;min-width:110px;margin:0"><label for="dm-l">Lote</label><input class="input" id="dm-l"></div>
+      <button type="button" class="btn sm primary" id="dm-ok">Registrar</button></div>` : ''}`;
+  RP.$$('[data-mdel]', box).forEach((b) => (b.onclick = () => RP.busy(b, async () => {
+    if (!confirm('Remover este material da atividade?')) return;
+    try { await RP.api('/materiais/movimentos/' + b.dataset.mdel, { method: 'DELETE' }); materialBox(e, tid, box); } catch (er) { RP.toast(er.message); }
+  })));
+  RP.$('#dm-ok', box)?.addEventListener('click', (ev) => RP.busy(ev.currentTarget, async () => {
+    const q = String(RP.$('#dm-q', box).value).replace(',', '.');
+    if (!(+q > 0)) { RP.toast('Informe a quantidade'); return; }
+    try { await RP.api('/materiais/movimentos', { method: 'POST', body: { tipo: 'aplicacao', tarefa_id: tid, material_id: +RP.$('#dm-m', box).value, quantidade: q, lote: RP.$('#dm-l', box).value } }); RP.toast('Material registrado'); materialBox(e, tid, box); } catch (er) { RP.toast(er.message); }
+  }));
+}
+
 // Relatório compilado do endereço: um PDF só, com a capa, o relatório de cada atividade com evidência e o termo de aceite no fim.
 // Montado no navegador (cada parte vem do servidor separada), para não esbarrar no limite de tamanho de resposta.
 function carregarPdfLib() {
@@ -507,6 +532,7 @@ async function editar(tid) {
     <h3 style="font-size:1.05rem;margin:18px 0 8px">Checklist</h3><div id="d-ck" class="muted">Carregando…</div>
     <div class="field"><label for="d-c">Comentário</label><textarea class="input" id="d-c" placeholder="Opcional — fica no histórico"></textarea></div>
     <h3 style="font-size:1.05rem;margin:18px 0 8px">Fotos</h3><div id="d-fotos" class="muted">Carregando…</div>
+    <h3 style="font-size:1.05rem;margin:18px 0 8px">Material aplicado</h3><div id="d-mat" class="muted">Carregando…</div>
     <h3 style="font-size:1.05rem;margin:18px 0 8px">Histórico</h3><div id="d-h" class="muted">Carregando…</div>`, {
     onSave: async (el) => {
       const body = {};
@@ -536,6 +562,7 @@ async function editar(tid) {
   }));
   RP.$('#d-evz', d.el)?.addEventListener('click', (ev) => baixarEvidencias([e.id], ev.currentTarget, tid));
   assinaturaBox(tid, RP.$('#d-ass', d.el));
+  materialBox(e, tid, RP.$('#d-mat', d.el));
   RP.api(`/tarefas/${tid}/checklist`).then((c) => { RP.$('#d-ck', d.el).innerHTML = checklistHtml(c); }).catch(() => { RP.$('#d-ck', d.el).textContent = ''; });
   const ev = await RP.api(`/tarefas/${tid}/eventos`);
   RP.api(`/tarefas/${tid}/fotos`).then((fs) => {

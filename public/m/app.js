@@ -3,7 +3,7 @@
 // e as fotos ficam guardadas até a conexão voltar. A sincronização envia fotos primeiro, depois as ações.
 (() => {
   'use strict';
-  const VERSAO = '1.6.1';
+  const VERSAO = '1.8.0';
   const ST = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', concluida: 'Concluída' };
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -21,6 +21,7 @@
   const ICON = {
     hoje: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>',
     sync: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.5 6.2M3 12a9 9 0 0 1 15.5-6.2"/><path d="M21 3v6h-6M3 21v-6h6"/></svg>',
+    chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>',
     conta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
     lixo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
     cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>',
@@ -128,6 +129,14 @@
     }
     if (a.tipo === 'excluir_foto') { bundle.fotos[a.tarefa_id] = (bundle.fotos[a.tarefa_id] || []).filter((x) => x.id !== a.foto_id); }
     if (a.tipo === 'resposta') { (bundle.respostas[a.tarefa_id] = bundle.respostas[a.tarefa_id] || {})[a.item_id] = { valor: a.valor, ok: a.ok }; }
+    if (a.tipo === 'material') {
+      const mt = (bundle.materiais || []).find((x) => x.id === a.material_id) || {};
+      ((bundle.aplicados = bundle.aplicados || {})[a.tarefa_id] = bundle.aplicados[a.tarefa_id] || []).push({ cliente_uuid: a.id, tarefa_id: a.tarefa_id, material_id: a.material_id, material: mt.nome, unidade: mt.unidade, quantidade: a.quantidade, lote: a.lote, observacao: a.observacao, usuario_id: a.usuario_id, criado_em: a.em, local: true });
+    }
+    if (a.tipo === 'material_remover') {
+      const l = (bundle.aplicados || {})[a.tarefa_id] || [];
+      bundle.aplicados[a.tarefa_id] = l.filter((x) => String(x.id) !== String(a.ref) && x.cliente_uuid !== a.ref);
+    }
     if (a.tipo === 'ativo') {
       const p = ((bundle.patrimonio = bundle.patrimonio || {})[t.endereco_id] = (bundle.patrimonio || {})[t.endereco_id] || { itens: [], ativos: [] });
       const igual = (x) => (a.patrimonio && x.patrimonio && x.patrimonio.toLowerCase() === a.patrimonio.toLowerCase()) || (a.numero_serie && x.numero_serie && x.numero_serie.toLowerCase() === a.numero_serie.toLowerCase());
@@ -247,6 +256,7 @@
       <main class="pg">${body}</main>
       <nav class="nav" aria-label="Navegação">
         <a href="#/" ${nav === 'hoje' ? 'aria-current="page"' : ''}>${ICON.hoje}Atividades</a>
+        <a href="#/chat" ${nav === 'chat' ? 'aria-current="page"' : ''}>${ICON.chat}Chat<span class="badge" id="badgeChat" ${naoLidas ? '' : 'hidden'}>${naoLidas > 99 ? '99+' : naoLidas}</span></a>
         <a href="#/sync" ${nav === 'sync' ? 'aria-current="page"' : ''}>${ICON.sync}Sincronizar<span class="badge" id="badge" ${pendentes() + erros.length ? '' : 'hidden'}>${pendentes() + erros.length}</span></a>
         <a href="#/conta" ${nav === 'conta' ? 'aria-current="page"' : ''}>${ICON.conta}Conta</a>
       </nav>`;
@@ -496,6 +506,7 @@
             return `<div class="it" data-it="${i.id}"><button class="box" role="checkbox" aria-checked="${!!r.ok}" data-check="${i.id}" aria-label="${esc(i.texto)}"></button><div class="tx">${esc(i.texto)}${obr}</div></div>`;
           }).join('')}</div>` : ''}
         ${secPatrimonio(t)}
+        ${secMateriais(t)}
         <div class="sec">Fotos da atividade (${fotos.filter((f) => !f.item_id).length})</div>
         <div class="card pad"><div class="thumbs" style="margin-top:0">${thumbs(fotos.filter((f) => !f.item_id), t)}${botaoCam('')}</div>
           <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:.88rem;color:var(--muted)"><input type="checkbox" id="gps" ${meta.gps !== false ? 'checked' : ''}> Guardar a localização nas fotos</label>
@@ -531,6 +542,7 @@
     }));
     $$('[data-foto]').forEach((inp) => (inp.onchange = () => novaFoto(t, inp.dataset.foto ? +inp.dataset.foto : null, inp.files[0])));
     ligarPatrimonio(t, () => telaTarefa(id));
+    ligarMateriais(t, () => telaTarefa(id));
     $$('img.thumb').forEach((im) => (im.onclick = () => verFoto(im)));
     $$('[data-apaga]').forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); const [cid, fid] = b.dataset.apaga.split('|'); apagarFoto(t, cid, fid ? +fid : null, () => telaTarefa(id)); }));
     $('#gps').onchange = async (e) => { meta.gps = e.target.checked; await salvarMeta(); };
@@ -543,6 +555,51 @@
       const texto = $('#coment').value.trim(); if (!texto) return;
       await enfileirar({ tipo: 'comentario', tarefa_id: t.id, texto });
       $('#coment').value = ''; toast(navigator.onLine ? 'Comentário enviado' : 'Comentário guardado para enviar');
+    };
+  }
+
+  // ---------- Material aplicado: quanto, de qual lote e onde (rastreabilidade) ----------
+  const fmtQ = (q) => String(+(+q).toFixed(3)).replace('.', ',');
+  function secMateriais(t) {
+    const cat = B.materiais || [];
+    const ap = (B.aplicados || {})[t.id] || [];
+    if (!cat.length && !ap.length) return '';
+    const fechada = t.status === 'concluida';
+    return `<div class="sec">Material aplicado (${ap.length})</div>
+      <div class="card pad mat">
+        ${ap.length ? `<ul class="matl">${ap.map((m) => `<li><div><b>${fmtQ(m.quantidade)} ${esc(m.unidade || '')}</b> ${esc(m.material || '')}<small>${m.lote ? 'Lote ' + esc(m.lote) + ' · ' : ''}${esc(new Date(m.criado_em).toLocaleDateString('pt-BR'))}${m.local ? ' · na fila' : ''}${m.observacao ? ' · ' + esc(m.observacao) : ''}</small></div>${!fechada && String(m.usuario_id) === String(B.usuario.id) ? `<button class="mdel" data-mrem="${esc(String(m.id || m.cliente_uuid))}" aria-label="Remover este material" title="Remover">×</button>` : ''}</li>`).join('')}</ul>` : '<p class="muted" style="margin:0 0 8px;font-size:.88rem">Nenhum material registrado nesta atividade.</p>'}
+        ${fechada || !cat.length ? '' : `
+        <label class="lb" for="mt-b">Material</label>
+        <input class="in" id="mt-b" list="mt-list" placeholder="Pesquisar material (nome ou código)" autocomplete="off">
+        <datalist id="mt-list">${cat.map((m) => `<option value="${esc(m.codigo ? m.codigo + ' · ' + m.nome : m.nome)}">`).join('')}</datalist>
+        <div class="row2" style="gap:8px">
+          <div style="flex:1"><label class="lb" for="mt-q">Quantidade <span id="mt-u" class="muted"></span></label><input class="in" id="mt-q" type="text" inputmode="decimal" autocomplete="off" placeholder="Ex.: 12,5"></div>
+          <div style="flex:1.3"><label class="lb" for="mt-l">Lote</label><input class="in" id="mt-l" autocomplete="off" placeholder="Opcional"></div>
+        </div>
+        <label class="lb" for="mt-o">Observação</label><input class="in" id="mt-o" autocomplete="off" placeholder="Opcional (ex.: trecho, ponto)">
+        <button class="btn primary block" style="margin-top:10px" id="mt-ok">Registrar material</button>`}
+      </div>`;
+  }
+  function ligarMateriais(t, redesenhar) {
+    $$('[data-mrem]').forEach((b) => (b.onclick = async () => {
+      if (!confirm('Remover este material da atividade?')) return;
+      await enfileirar({ tipo: 'material_remover', tarefa_id: t.id, ref: b.dataset.mrem });
+      toast('Material removido'); redesenhar();
+    }));
+    const ok = $('#mt-ok'); if (!ok) return;
+    const cat = B.materiais || [];
+    const achar = () => { const v = norm($('#mt-b').value.trim()); return cat.find((m) => norm(m.codigo ? m.codigo + ' · ' + m.nome : m.nome) === v) || cat.find((m) => norm(m.nome) === v || (m.codigo && norm(m.codigo) === v)); };
+    $('#mt-b').oninput = () => { const m = achar(); $('#mt-u').textContent = m ? `(${m.unidade})` : ''; };
+    ok.onclick = async () => {
+      const m = achar();
+      if (!m) { toast('Escolha um material da lista'); $('#mt-b').focus(); return; }
+      const q = parseFloat(String($('#mt-q').value).replace(',', '.'));
+      if (!(q > 0)) { toast('Informe a quantidade'); $('#mt-q').focus(); return; }
+      ok.disabled = true;
+      const pos = await Promise.race([posicao(), new Promise((r) => setTimeout(() => r(null), 4000))]);
+      await enfileirar({ tipo: 'material', tarefa_id: t.id, material_id: m.id, quantidade: q, lote: $('#mt-l').value.trim() || null, observacao: $('#mt-o').value.trim() || null, lat: pos?.lat ?? null, lon: pos?.lon ?? null });
+      toast(navigator.onLine ? 'Material registrado' : 'Material guardado para enviar');
+      redesenhar();
     };
   }
 
@@ -821,11 +878,87 @@
     };
   }
 
+  // ---------------- Chat: conversa do projeto com o escritório e a equipe (precisa de internet) ----------------
+  let naoLidas = 0, chatT = null;
+  const TIPO_MSG = { mensagem: 'Mensagem', pedido: 'Pedido', ocorrencia: 'Ocorrência' };
+  async function contarNaoLidas() {
+    if (!navigator.onLine || !B) return;
+    try { naoLidas = (await api('/chat/nao-lidas')).n || 0; } catch (_) { return; }
+    const b = $('#badgeChat'); if (b) { b.hidden = !naoLidas; b.textContent = naoLidas > 99 ? '99+' : naoLidas; }
+  }
+  setInterval(contarNaoLidas, 60000);
+  setTimeout(contarNaoLidas, 2500);
+  const horaMsg = (d) => { const x = new Date(d), hj = new Date(); return x.toDateString() === hj.toDateString() ? x.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : x.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + x.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); };
+  async function telaChat() {
+    clearInterval(chatT);
+    layout({ title: 'Chat', nav: 'chat', body: '<div class="empty">Carregando conversas…</div>' });
+    if (!navigator.onLine) { $('.pg').innerHTML = '<div class="card pad empty">O chat precisa de internet. Suas atividades continuam funcionando sem conexão.</div>'; return; }
+    let cs;
+    try { cs = await api('/chat/canais'); } catch (e) { $('.pg').innerHTML = `<div class="card pad empty">${esc(e.message)}</div>`; return; }
+    if ((location.hash || '') !== '#/chat') return;
+    $('.pg').innerHTML = `<p class="muted" style="margin:0 0 10px;font-size:.88rem">Converse com o escritório e a equipe sobre cada projeto. Use <b>Pedido</b> ou <b>Ocorrência</b> para o que precisa de resposta.</p>
+      ${cs.map((c) => `<a class="card end chatc" href="#/chat/${esc(c.url)}"><div class="chatt"><h2>${esc(c.nome)}</h2>${c.nao_lidas ? `<span class="badge">${c.nao_lidas}</span>` : ''}</div>
+        <div class="meta">${c.ultima ? `<b>${esc(c.ultima.usuario || '—')}:</b> ${esc(String(c.ultima.texto).slice(0, 90))} · ${horaMsg(c.ultima.criado_em)}` : 'Nenhuma mensagem ainda'}${c.abertos ? ` · <span style="color:var(--warn)">${c.abertos} em aberto</span>` : ''}</div></a>`).join('')}`;
+  }
+  async function telaConversa(url) {
+    clearInterval(chatT);
+    layout({ title: 'Chat', back: true, nav: 'chat', body: '<div class="empty">Carregando…</div>' });
+    if (!navigator.onLine) { $('.pg').innerHTML = '<div class="card pad empty">O chat precisa de internet.</div>'; return; }
+    let canais = [], msgs = [];
+    try { [canais, msgs] = await Promise.all([api('/chat/canais'), api(`/chat/${url}/mensagens`)]); } catch (e) { $('.pg').innerHTML = `<div class="card pad empty">${esc(e.message)}</div>`; return; }
+    const c = canais.find((x) => x.url === url) || { nome: 'Conversa' };
+    $('.hd h1').textContent = c.nome;
+    // endereços do técnico neste projeto, para citar na mensagem
+    const ends = c.cliente_id ? [...new Map(B.tarefas.filter((t) => t.cliente_id === c.cliente_id).map((t) => [t.endereco_id, t])).values()] : [];
+    let tipo = 'mensagem';
+    $('.pg').innerHTML = `<div class="chatm" id="msgs"></div>
+      <form class="chatf" id="cf">
+        <div class="seg" role="group" aria-label="Tipo">${Object.entries(TIPO_MSG).map(([k, v]) => `<button type="button" data-tp="${k}" aria-pressed="${k === tipo}">${v}</button>`).join('')}</div>
+        ${ends.length ? `<select class="in" id="cfe" aria-label="Endereço (opcional)"><option value="">Sem endereço</option>${ends.map((t) => `<option value="${t.endereco_id}">${esc(t.endereco)} · ${esc(t.municipio)}/${esc(t.uf)}</option>`).join('')}</select>` : ''}
+        <div class="row2"><textarea class="in" id="cft" rows="2" maxlength="4000" placeholder="Escreva uma mensagem" aria-label="Mensagem"></textarea><button class="btn primary" id="cfb" aria-label="Enviar">Enviar</button></div>
+      </form>`;
+    const box = $('#msgs');
+    const desenhar = (lista, rolar) => {
+      box.innerHTML = lista.length ? lista.map((m) => { const eu = String(m.usuario_id) === String(B.usuario.id);
+        return `<div class="msg ${eu ? 'eu' : ''} ${m.tipo !== 'mensagem' ? 't-' + m.tipo : ''}">${eu ? '' : `<b>${esc(m.usuario || '—')}</b>`}
+          ${m.tipo !== 'mensagem' ? `<span class="mt">${TIPO_MSG[m.tipo]}${m.resolvido ? ' · resolvido' : ''}</span>` : ''}<p>${esc(m.texto).replace(/\n/g, '<br>')}</p>
+          ${m.endereco ? `<small class="me">📍 ${esc(m.endereco)} · ${esc(m.municipio || '')}/${esc(m.uf || '')}</small>` : ''}<small>${horaMsg(m.criado_em)}</small></div>`; }).join('')
+        : '<div class="empty">Nenhuma mensagem ainda. Comece a conversa.</div>';
+      if (rolar) window.scrollTo(0, document.body.scrollHeight);
+    };
+    desenhar(msgs, true);
+    api(`/chat/${url}/lido`, { method: 'POST' }).then(contarNaoLidas).catch(() => {});
+    $$('[data-tp]').forEach((b) => (b.onclick = () => { tipo = b.dataset.tp; $$('[data-tp]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); }));
+    $('#cf').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const texto = $('#cft').value.trim(); if (!texto) return;
+      $('#cfb').disabled = true;
+      try {
+        await api(`/chat/${url}/mensagens`, { method: 'POST', body: { texto, tipo, endereco_id: $('#cfe') && $('#cfe').value ? +$('#cfe').value : null } });
+        $('#cft').value = '';
+        msgs = await api(`/chat/${url}/mensagens`); desenhar(msgs, true);
+      } catch (e) { toast(e.rede ? 'Sem conexão: a mensagem não foi enviada' : e.message); }
+      $('#cfb').disabled = false;
+    };
+    // novas mensagens enquanto a conversa está aberta
+    chatT = setInterval(async () => {
+      if (!location.hash.startsWith('#/chat/') || document.hidden || !navigator.onLine) return;
+      const ult = msgs.length ? msgs[msgs.length - 1].id : 0;
+      try {
+        const novas = await api(`/chat/${url}/mensagens?depois=${ult}`);
+        if (novas.length) { const noFim = window.innerHeight + window.scrollY >= document.body.scrollHeight - 80; msgs = msgs.concat(novas); desenhar(msgs, noFim); api(`/chat/${url}/lido`, { method: 'POST' }).catch(() => {}); }
+      } catch (_) { /* tenta de novo */ }
+    }, 8000);
+  }
+
   // ---------------- Rotas ----------------
   function rota() {
     if (!B) return telaLogin();
     const h = location.hash || '#/';
     let m;
+    if (!h.startsWith('#/chat')) clearInterval(chatT);
+    if ((m = h.match(/^#\/chat\/([a-z0-9-]+)/))) return telaConversa(m[1]);
+    if (h.startsWith('#/chat')) return telaChat();
     if ((m = h.match(/^#\/e\/(\d+)/))) return telaEndereco(+m[1]);
     if ((m = h.match(/^#\/t\/(\d+)/))) return telaTarefa(+m[1]);
     if (h.startsWith('#/sync')) return telaSync();

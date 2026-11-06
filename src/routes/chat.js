@@ -2,7 +2,7 @@
 const db = require('../db');
 const v = require('../validate');
 const { HttpError } = require('../http');
-const { requer, INTERNOS } = require('../auth');
+const { requer, INTERNOS, pode } = require('../auth');
 
 const TIPOS = ['mensagem', 'pedido', 'ocorrencia'];
 // na URL: geral | cliente-12  ·  no banco: geral | cliente:12
@@ -14,11 +14,25 @@ function canalDe(p) {
   return `cliente:${m[1]}`;
 }
 
+// Quem não vê os projetos (ex.: técnico) conversa no Geral e nos projetos em que tem atividade
+async function projetosDoUsuario(u) {
+  if (pode(u, 'projetos', 'ver') || pode(u, 'rota', 'ver') || pode(u, 'clientes', 'ver')) return null; // todos
+  if (!u.pessoa_id) return [];
+  return (await db.many(`SELECT DISTINCT ct.cliente_id FROM tarefas t JOIN enderecos e ON e.id = t.endereco_id JOIN contratos ct ON ct.id = e.contrato_id
+                          WHERE t.responsavel_id = $1`, [u.pessoa_id])).map((r) => +r.cliente_id);
+}
+async function conferirCanal(u, canal) {
+  if (canal === 'geral') return;
+  const ids = await projetosDoUsuario(u);
+  if (ids && !ids.includes(+canal.split(':')[1])) throw new HttpError(403, 'Você não participa deste projeto');
+}
+
 module.exports = (app) => {
   const interno = requer(INTERNOS);
 
   app.get('/api/chat/canais', interno, async (req) => {
-    const clientes = await db.many(`SELECT id, nome FROM clientes WHERE ativo ORDER BY nome`);
+    const ids = await projetosDoUsuario(req.user);
+    const clientes = (await db.many(`SELECT id, nome FROM clientes WHERE ativo ORDER BY nome`)).filter((c) => !ids || ids.includes(+c.id));
     const canais = [{ canal: 'geral', url: 'geral', nome: 'Geral', tipo: 'geral' }, ...clientes.map((c) => ({ canal: `cliente:${c.id}`, url: `cliente-${c.id}`, nome: c.nome, tipo: 'projeto', cliente_id: c.id }))];
     const ult = await db.many(
       `SELECT DISTINCT ON (m.canal) m.canal, m.texto, m.tipo, m.criado_em, u.nome AS usuario
@@ -33,6 +47,7 @@ module.exports = (app) => {
 
   app.get('/api/chat/:canal/mensagens', interno, async (req) => {
     const canal = canalDe(req.params.canal);
+    await conferirCanal(req.user, canal);
     const depois = req.query.depois ? v.id(req.query.depois, 'Mensagem') : 0;
     const rows = await db.many(
       `SELECT m.id, m.tipo, m.texto, m.resolvido, m.criado_em, m.usuario_id, u.nome AS usuario, u.perfil, m.endereco_id, e.nome AS endereco, e.municipio, e.uf
@@ -44,6 +59,7 @@ module.exports = (app) => {
   // endereços do projeto para citar numa mensagem
   app.get('/api/chat/:canal/enderecos', interno, async (req) => {
     const canal = canalDe(req.params.canal);
+    await conferirCanal(req.user, canal);
     if (canal === 'geral') return [];
     return db.many(`SELECT e.id, e.nome, e.codigo, e.municipio, e.uf FROM enderecos e JOIN contratos ct ON ct.id = e.contrato_id
                      WHERE ct.cliente_id = $1 ORDER BY e.nome LIMIT 3000`, [+canal.split(':')[1]]);
@@ -51,6 +67,7 @@ module.exports = (app) => {
 
   app.post('/api/chat/:canal/mensagens', interno, async (req) => {
     const canal = canalDe(req.params.canal);
+    await conferirCanal(req.user, canal);
     const texto = v.str(req.body.texto, 'a mensagem', { max: 4000 });
     const tipo = v.oneOf(req.body.tipo || 'mensagem', 'Tipo', TIPOS);
     const end = req.body.endereco_id ? v.id(req.body.endereco_id, 'Endereço') : null;
@@ -73,7 +90,11 @@ module.exports = (app) => {
   });
 
   // total de não lidas (para o selo no menu)
-  app.get('/api/chat/nao-lidas', interno, async (req) => db.one(
-    `SELECT count(*)::int AS n FROM mensagens m LEFT JOIN chat_leituras l ON l.canal = m.canal AND l.usuario_id = $1
-      WHERE m.criado_em > COALESCE(l.lido_em, 'epoch') AND m.usuario_id IS DISTINCT FROM $1`, [req.user.id]));
+  app.get('/api/chat/nao-lidas', interno, async (req) => {
+    const ids = await projetosDoUsuario(req.user);
+    const canais = ids ? ['geral', ...ids.map((i) => `cliente:${i}`)] : null;
+    return db.one(
+      `SELECT count(*)::int AS n FROM mensagens m LEFT JOIN chat_leituras l ON l.canal = m.canal AND l.usuario_id = $1
+        WHERE m.criado_em > COALESCE(l.lido_em, 'epoch') AND m.usuario_id IS DISTINCT FROM $1 AND ($2::text[] IS NULL OR m.canal = ANY($2::text[]))`, [req.user.id, canais]);
+  });
 };

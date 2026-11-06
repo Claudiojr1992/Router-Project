@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Materiais · RoutProject</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="/css/app.css">
+<script src="/js/api.js"></script>
+<script src="/js/shell.js"></script>
+<script src="/js/planilha.js"></script>
+</head>
+<body>
+<script>
+// Controle de material: estoque (saldo = entradas + devoluções ± ajustes − aplicado), entradas por nota/lote
+// e rastreabilidade: onde cada material e cada lote foi aplicado (projeto, endereço, atividade, técnico, data e GPS).
+const TIPO = { entrada: ['Entrada', 'var(--ok)'], aplicacao: ['Aplicado', 'var(--accent)'], devolucao: ['Devolução', 'var(--info)'], ajuste: ['Ajuste', 'var(--warn)'] };
+const UNID = ['un', 'm', 'cx', 'pc', 'kg', 'l', 'rolo', 'par', 'kit', 'jg'];
+let S, mats = [], movs = [], aba = 'estoque', q = '', fMat = '', fTipo = '', fCli = '', rastreio = null;
+const editar = () => Shell.pode('materiais', 'editar');
+const fQ = (n) => (+n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+const pill = (t) => `<span class="pill" style="color:${TIPO[t][1]}"><i></i>${TIPO[t][0]}</span>`;
+const norm = (x) => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+(async () => {
+  S = await Shell.init({ key: 'materiais', title: 'Materiais', sub: 'Estoque, entradas e onde cada material foi aplicado' });
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('aba')) aba = qs.get('aba');
+  if (qs.get('material')) fMat = qs.get('material');
+  if (qs.get('lote')) { aba = 'rastreio'; await rastrear(qs.get('lote')); }
+  await carregar();
+})();
+
+async function carregar() {
+  [mats, movs] = await Promise.all([RP.api('/materiais?todos=1'), RP.api('/materiais/movimentos')]);
+  render();
+}
+
+function render() {
+  S.actions.innerHTML = editar()
+    ? '<button class="btn sm" id="exp">Exportar</button><button class="btn sm" id="ent">+ Entrada</button><button class="btn sm primary" id="novo">+ Material</button>'
+    : '<button class="btn sm" id="exp">Exportar</button>';
+  RP.$('#novo')?.addEventListener('click', () => material(null));
+  RP.$('#ent')?.addEventListener('click', () => movimento('entrada'));
+  RP.$('#exp').onclick = exportar;
+  const ativos = mats.filter((m) => m.ativo);
+  const abaixo = ativos.filter((m) => m.abaixo_minimo);
+  const aplic = movs.filter((m) => m.tipo === 'aplicacao');
+  S.content.innerHTML = `
+    <div class="kpis matk">
+      <div class="card kpi"><span>Materiais ativos</span><b>${ativos.length}</b></div>
+      <div class="card kpi ${abaixo.length ? 'warn' : ''}"><span>Abaixo do mínimo</span><b>${abaixo.length}</b></div>
+      <div class="card kpi"><span>Aplicações registradas</span><b>${aplic.length}</b></div>
+      <div class="card kpi"><span>Endereços com material</span><b>${new Set(aplic.map((m) => m.endereco_id)).size}</b></div>
+    </div>
+    <div class="card">
+      <div class="vtabs" role="tablist" style="padding:12px 16px 0;margin:0">${[['estoque', 'Estoque'], ['movimentos', `Movimentações (${movs.length})`], ['rastreio', 'Rastreabilidade']].map(([k, t]) => `<button type="button" role="tab" class="eqc" data-aba="${k}" aria-pressed="${aba === k}">${t}</button>`).join('')}</div>
+      <div id="corpo"></div>
+    </div>`;
+  RP.$$('[data-aba]').forEach((b) => (b.onclick = () => { aba = b.dataset.aba; history.replaceState(null, '', `/app/materiais.html?aba=${aba}`); render(); }));
+  const c = RP.$('#corpo');
+  if (aba === 'estoque') estoque(c);
+  else if (aba === 'movimentos') movimentos(c);
+  else rastreioTela(c);
+}
+
+// ---------- Estoque ----------
+function estoque(c) {
+  const lq = norm(q);
+  const vis = mats.filter((m) => !lq || norm([m.codigo, m.nome, m.categoria, m.fabricante].join(' ')).includes(lq));
+  c.innerHTML = `
+    <div class="toolbar" style="padding:12px 16px"><input class="input" id="q" type="search" placeholder="Buscar material, código, categoria" aria-label="Buscar materiais" value="${RP.esc(q)}" style="max-width:320px"><span class="spacer"></span><span class="muted">${vis.length} material(is)</span></div>
+    ${vis.length ? `<div class="scroll" style="max-height:calc(100vh - 360px)"><table class="tbl"><thead><tr><th>Código</th><th>Material</th><th>Categoria</th><th class="num">Saldo</th><th class="num">Mínimo</th><th class="num">Entradas</th><th class="num">Aplicado</th><th>Último movimento</th><th></th></tr></thead>
+      <tbody>${vis.map((m) => `<tr class="click ${m.ativo ? '' : 'inativo'}" data-id="${m.id}"><td>${RP.esc(m.codigo || '—')}</td><td><b>${RP.esc(m.nome)}</b>${m.ativo ? '' : ' <span class="muted">(inativo)</span>'}${m.fabricante ? `<div class="muted" style="font-size:.8rem">${RP.esc(m.fabricante)}</div>` : ''}</td><td>${RP.esc(m.categoria || '—')}</td>
+        <td class="num"><b style="color:${+m.saldo < 0 ? 'var(--err)' : m.abaixo_minimo ? 'var(--warn)' : 'inherit'}">${fQ(m.saldo)}</b> ${RP.esc(m.unidade)}</td><td class="num">${fQ(m.estoque_minimo)}</td><td class="num">${fQ(m.entradas)}</td><td class="num">${fQ(m.aplicado)}</td><td>${m.ultimo ? RP.fmtDataHora(m.ultimo) : '—'}</td>
+        <td class="num"><button type="button" class="btn sm" data-ver="${m.id}">Onde foi aplicado</button></td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty">${mats.length ? 'Nenhum material nesta busca.' : `Nenhum material cadastrado.${editar() ? ' Use “+ Material” para começar (ex.: cabo UTP, conector RJ45, eletroduto).' : ''}`}</div>`}`;
+  const q$ = RP.$('#q'); q$.oninput = () => { q = q$.value; clearTimeout(q$._t); q$._t = setTimeout(() => { render(); const n = RP.$('#q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
+  RP.$$('[data-ver]', c).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); fMat = b.dataset.ver; fTipo = 'aplicacao'; aba = 'movimentos'; render(); }));
+  RP.$$('tr.click', c).forEach((r) => (r.onclick = () => material(mats.find((m) => m.id === +r.dataset.id))));
+}
+
+// ---------- Movimentações ----------
+function movimentos(c) {
+  const clientes = [...new Map(movs.filter((m) => m.cliente_id).map((m) => [m.cliente_id, m.cliente])).entries()];
+  const lq = norm(q);
+  const vis = movs.filter((m) => (!fMat || String(m.material_id) === fMat) && (!fTipo || m.tipo === fTipo) && (!fCli || String(m.cliente_id) === fCli)
+    && (!lq || norm([m.material, m.lote, m.documento, m.fornecedor, m.endereco, m.endereco_codigo, m.atividade, m.pessoa, m.usuario, m.observacao].join(' ')).includes(lq)));
+  c.innerHTML = `
+    <div class="toolbar" style="padding:12px 16px">
+      <input class="input" id="q" type="search" placeholder="Buscar lote, nota, endereço, técnico" aria-label="Buscar movimentações" value="${RP.esc(q)}" style="max-width:280px">
+      <select class="input" id="fm" style="max-width:240px" aria-label="Material"><option value="">Todos os materiais</option>${mats.map((m) => `<option value="${m.id}" ${String(m.id) === fMat ? 'selected' : ''}>${RP.esc(m.nome)}</option>`).join('')}</select>
+      <select class="input" id="ft" style="max-width:160px" aria-label="Tipo"><option value="">Todos os tipos</option>${Object.entries(TIPO).map(([k, v]) => `<option value="${k}" ${k === fTipo ? 'selected' : ''}>${v[0]}</option>`).join('')}</select>
+      <select class="input" id="fc" style="max-width:240px" aria-label="Projeto"><option value="">Todos os projetos</option>${clientes.map(([id, n]) => `<option value="${id}" ${String(id) === fCli ? 'selected' : ''}>${RP.esc(n)}</option>`).join('')}</select>
+      <span class="spacer"></span>${editar() ? '<button class="btn sm" id="aj">Ajuste / devolução</button>' : ''}<span class="muted">${vis.length} movimento(s)</span>
+    </div>
+    ${vis.length ? `<div class="scroll" style="max-height:calc(100vh - 360px)"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Material</th><th class="num">Qtd.</th><th>Lote</th><th>Onde (projeto · endereço · atividade)</th><th>Quem</th><th>Documento / obs.</th><th></th></tr></thead>
+      <tbody>${vis.slice(0, 1500).map((m) => `<tr><td>${RP.fmtDataHora(m.criado_em)}</td><td>${pill(m.tipo)}</td><td><b>${RP.esc(m.material)}</b></td>
+        <td class="num">${m.tipo === 'aplicacao' ? '−' : +m.quantidade < 0 ? '' : '+'}${fQ(m.quantidade)} ${RP.esc(m.unidade)}</td>
+        <td>${m.lote ? `<button type="button" class="lnk" data-lote="${RP.esc(m.lote)}" title="Rastrear este lote">${RP.esc(m.lote)}</button>` : '—'}</td>
+        <td>${m.endereco ? `${RP.esc(m.cliente || '')}<div><b>${RP.esc(m.endereco_codigo ? m.endereco_codigo + ' · ' : '')}${RP.esc(m.endereco)}</b> <span class="muted">${RP.esc(m.municipio || '')}/${m.uf || ''}</span></div>${m.atividade ? `<div class="muted" style="font-size:.8rem">${RP.esc(m.atividade)}</div>` : ''}${m.lat != null ? `<a class="muted" style="font-size:.78rem" href="https://www.openstreetmap.org/?mlat=${m.lat}&mlon=${m.lon}#map=18/${m.lat}/${m.lon}" target="_blank" rel="noopener">GPS ${(+m.lat).toFixed(5)}, ${(+m.lon).toFixed(5)}</a>` : ''}` : '<span class="muted">Estoque</span>'}</td>
+        <td>${RP.esc(m.pessoa || m.usuario || '—')}</td><td>${RP.esc([m.documento, m.fornecedor, m.observacao].filter(Boolean).join(' · ') || '—')}</td>
+        <td class="num">${editar() && Shell.acao('excluir') ? `<button type="button" class="btn sm danger" data-del="${m.id}" title="Excluir movimento">Excluir</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhuma movimentação neste filtro.</div>'}`;
+  const q$ = RP.$('#q'); q$.oninput = () => { q = q$.value; clearTimeout(q$._t); q$._t = setTimeout(() => { render(); const n = RP.$('#q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
+  RP.$('#fm').onchange = (e) => { fMat = e.target.value; render(); };
+  RP.$('#ft').onchange = (e) => { fTipo = e.target.value; render(); };
+  RP.$('#fc').onchange = (e) => { fCli = e.target.value; render(); };
+  RP.$('#aj')?.addEventListener('click', () => movimento('ajuste'));
+  RP.$$('[data-lote]', c).forEach((b) => (b.onclick = async () => { aba = 'rastreio'; await rastrear(b.dataset.lote); render(); }));
+  RP.$$('[data-del]', c).forEach((b) => (b.onclick = () => RP.busy(b, async () => {
+    if (!confirm('Excluir este movimento? O saldo é recalculado e a exclusão fica na auditoria.')) return;
+    try { await RP.api('/materiais/movimentos/' + b.dataset.del, { method: 'DELETE' }); RP.toast('Movimento excluído'); await carregar(); } catch (e) { RP.toast(e.message); }
+  })));
+}
+
+// ---------- Rastreabilidade ----------
+async function rastrear(lote) {
+  try { rastreio = await RP.api('/materiais/rastreio?lote=' + encodeURIComponent(lote)); } catch (e) { RP.toast(e.message); rastreio = null; }
+}
+function rastreioTela(c) {
+  const lotes = [...new Set(movs.filter((m) => m.lote).map((m) => m.lote))].sort();
+  const r = rastreio;
+  const ap = r ? r.movimentos.filter((m) => m.tipo === 'aplicacao') : [];
+  c.innerHTML = `
+    <div class="toolbar" style="padding:12px 16px">
+      <input class="input" id="lt" list="lotes" placeholder="Digite ou escolha o lote" aria-label="Lote" value="${RP.esc(r ? r.lote : '')}" style="max-width:280px">
+      <datalist id="lotes">${lotes.map((l) => `<option value="${RP.esc(l)}">`).join('')}</datalist>
+      <button class="btn sm primary" id="rs">Rastrear</button>
+      <span class="muted" style="font-size:.86rem">Mostra a entrada do lote e cada endereço onde ele foi aplicado.</span>
+    </div>
+    ${!r ? `<div class="empty">${lotes.length ? 'Escolha um lote para ver onde foi aplicado.' : 'Nenhum lote registrado ainda. Informe o lote nas entradas e no app, ao registrar o material aplicado.'}</div>`
+      : !r.movimentos.length ? '<div class="empty">Nenhum movimento com este lote.</div>'
+      : `<div class="kpis matk" style="padding:0 16px 12px">
+          <div class="card kpi"><span>Entrou</span><b>${fQ(r.resumo.entradas)}</b></div>
+          <div class="card kpi"><span>Aplicado</span><b>${fQ(r.resumo.aplicado)}</b></div>
+          <div class="card kpi"><span>Endereços</span><b>${r.resumo.enderecos}</b></div>
+          <div class="card kpi"><span>Projetos</span><b>${r.resumo.projetos}</b></div>
+        </div>
+        <ol class="rastro">${r.movimentos.map((m) => `<li class="t-${m.tipo}"><div class="rq">${pill(m.tipo)} <b>${fQ(m.quantidade)} ${RP.esc(m.unidade)}</b> de ${RP.esc(m.material)}</div>
+          <div>${m.endereco ? `<b>${RP.esc(m.endereco)}</b> · ${RP.esc(m.municipio || '')}/${m.uf || ''} · ${RP.esc(m.cliente || '')}${m.atividade ? ` · ${RP.esc(m.atividade)}` : ''}` : RP.esc([m.documento && 'Doc. ' + m.documento, m.fornecedor].filter(Boolean).join(' · ') || 'Estoque')}</div>
+          <small class="muted">${RP.fmtDataHora(m.criado_em)} · ${RP.esc(m.pessoa || m.usuario || '—')}${m.lat != null ? ` · GPS ${(+m.lat).toFixed(5)}, ${(+m.lon).toFixed(5)}` : ''}${m.observacao ? ' · ' + RP.esc(m.observacao) : ''}</small></li>`).join('')}</ol>
+        ${ap.length ? '' : '<div class="muted" style="padding:0 16px 14px">Este lote ainda não foi aplicado em nenhum endereço.</div>'}`}`;
+  const go = async () => { const v = RP.$('#lt').value.trim(); if (!v) return; await rastrear(v); history.replaceState(null, '', `/app/materiais.html?lote=${encodeURIComponent(v)}`); render(); };
+  RP.$('#rs').onclick = go;
+  RP.$('#lt').onkeydown = (e) => { if (e.key === 'Enter') go(); };
+}
+
+// ---------- Cadastro e lançamentos ----------
+const campo = (id, label, v = '', extra = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${RP.esc(v ?? '')}" ${extra}></div>`;
+function material(m) {
+  const x = m || { unidade: 'un', estoque_minimo: 0, ativo: true };
+  const ro = editar() ? '' : 'disabled';
+  const d = RP.drawer(m ? m.nome : 'Novo material', `
+    <div class="row"><div style="flex:1">${campo('m-cod', 'Código', x.codigo, ro + ' placeholder="Opcional"')}</div><div class="field" style="flex:1"><label for="m-un">Unidade</label><select class="input" id="m-un" ${ro}>${UNID.map((u) => `<option ${u === x.unidade ? 'selected' : ''}>${u}</option>`).join('')}</select></div></div>
+    ${campo('m-nome', 'Nome', x.nome, ro + ' placeholder="Ex.: Cabo UTP Cat6"')}
+    <div class="row"><div style="flex:1">${campo('m-cat', 'Categoria', x.categoria, ro + ' placeholder="Ex.: Cabeamento"')}</div><div style="flex:1">${campo('m-fab', 'Fabricante', x.fabricante, ro)}</div></div>
+    ${campo('m-min', 'Estoque mínimo', x.estoque_minimo, 'type="number" min="0" step="any" ' + ro)}
+    <div class="field"><label for="m-obs">Observação</label><textarea class="input" id="m-obs" ${ro}>${RP.esc(x.observacao || '')}</textarea></div>
+    <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="m-at" ${x.ativo ? 'checked' : ''} ${ro}> Ativo (aparece no app do técnico)</label>
+    ${m ? `<div class="card" style="margin-top:14px;padding:12px"><b>Saldo: ${fQ(m.saldo)} ${RP.esc(m.unidade)}</b><div class="muted" style="font-size:.86rem">Entradas ${fQ(m.entradas)} · aplicado ${fQ(m.aplicado)}</div>${editar() ? '<button type="button" class="btn sm" id="m-ent" style="margin-top:8px">+ Entrada deste material</button>' : ''}</div>` : ''}
+    ${m && editar() && Shell.acao('excluir') ? '<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px"><button class="btn sm danger" type="button" id="m-del">Excluir material</button> <span class="muted" style="font-size:.82rem">Com movimentações, ele é só inativado (a rastreabilidade fica).</span></div>' : ''}`,
+  editar() ? { onSave: async (el) => {
+    const v = (id) => RP.$('#' + id, el).value;
+    const body = { codigo: v('m-cod'), nome: v('m-nome'), unidade: v('m-un'), categoria: v('m-cat'), fabricante: v('m-fab'), estoque_minimo: v('m-min') || 0, observacao: v('m-obs'), ativo: RP.$('#m-at', el).checked };
+    if (m) await RP.api('/materiais/' + m.id, { method: 'PUT', body }); else await RP.api('/materiais', { method: 'POST', body });
+    RP.toast('Material salvo'); await carregar();
+  } } : {});
+  RP.$('#m-ent', d.el)?.addEventListener('click', () => { d.close(); movimento('entrada', m.id); });
+  RP.$('#m-del', d.el)?.addEventListener('click', async () => {
+    if (!confirm('Excluir este material?')) return;
+    try { const r = await RP.api('/materiais/' + m.id, { method: 'DELETE' }); RP.toast(r.inativado ? 'Material com histórico: foi inativado' : 'Material excluído'); d.close(); await carregar(); } catch (e) { RP.toast(e.message); }
+  });
+}
+
+function movimento(tipo, materialId) {
+  const lista = mats.filter((m) => m.ativo);
+  if (!lista.length) { RP.toast('Cadastre um material primeiro'); return; }
+  RP.drawer(tipo === 'entrada' ? 'Entrada de material' : 'Ajuste ou devolução', `
+    ${tipo === 'entrada' ? '' : `<div class="field"><label for="v-tp">Tipo</label><select class="input" id="v-tp"><option value="devolucao">Devolução (volta ao estoque)</option><option value="ajuste">Ajuste de inventário (+ ou −)</option></select></div>`}
+    <div class="field"><label for="v-mat">Material</label><select class="input" id="v-mat">${lista.map((m) => `<option value="${m.id}" ${m.id === materialId ? 'selected' : ''}>${RP.esc(m.nome)} (${RP.esc(m.unidade)})</option>`).join('')}</select></div>
+    <div class="row"><div style="flex:1">${campo('v-q', 'Quantidade', '', 'type="number" step="any" required')}</div><div style="flex:1">${campo('v-lote', 'Lote', '', 'placeholder="Opcional, mas permite rastrear"')}</div></div>
+    ${tipo === 'entrada' ? `<div class="row"><div style="flex:1">${campo('v-doc', 'Nota fiscal / documento', '')}</div><div style="flex:1">${campo('v-forn', 'Fornecedor', '')}</div></div>` : ''}
+    <div class="field"><label for="v-obs">Observação</label><textarea class="input" id="v-obs"></textarea></div>
+    ${tipo === 'entrada' ? '' : '<small class="muted">No ajuste, use quantidade negativa para baixar do estoque (perda, quebra, inventário).</small>'}`, {
+    saveLabel: 'Lançar',
+    onSave: async (el) => {
+      const v = (id) => (RP.$('#' + id, el) || {}).value;
+      await RP.api('/materiais/movimentos', { method: 'POST', body: { tipo: tipo === 'entrada' ? 'entrada' : v('v-tp'), material_id: +v('v-mat'), quantidade: String(v('v-q')).replace(',', '.'), lote: v('v-lote'), documento: v('v-doc'), fornecedor: v('v-forn'), observacao: v('v-obs') } });
+      RP.toast('Lançamento registrado'); await carregar();
+    },
+  });
+}
+
+function exportar() {
+  const lin = aba === 'estoque'
+    ? [['Código', 'Material', 'Unidade', 'Categoria', 'Saldo', 'Mínimo', 'Entradas', 'Aplicado', 'Ativo'], ...mats.map((m) => [m.codigo || '', m.nome, m.unidade, m.categoria || '', +m.saldo, +m.estoque_minimo, +m.entradas, +m.aplicado, m.ativo ? 'sim' : 'não'])]
+    : [['Data', 'Tipo', 'Material', 'Quantidade', 'Unidade', 'Lote', 'Projeto', 'Endereço', 'Código', 'Município/UF', 'Atividade', 'Técnico/usuário', 'Latitude', 'Longitude', 'Documento', 'Fornecedor', 'Observação'],
+      ...movs.map((m) => [RP.fmtDataHora(m.criado_em), TIPO[m.tipo][0], m.material, (m.tipo === 'aplicacao' ? -1 : 1) * m.quantidade, m.unidade, m.lote || '', m.cliente || '', m.endereco || '', m.endereco_codigo || '', m.municipio ? `${m.municipio}/${m.uf}` : '', m.atividade || '', m.pessoa || m.usuario || '', m.lat ?? '', m.lon ?? '', m.documento || '', m.fornecedor || '', m.observacao || ''])];
+  Planilha.baixar(Planilha.xlsx([{ nome: aba === 'estoque' ? 'Estoque' : 'Movimentações', linhas: lin }]), aba === 'estoque' ? 'Materiais_estoque.xlsx' : 'Materiais_movimentacoes.xlsx');
+}
+</script>
+</body>
+</html>

@@ -1607,7 +1607,7 @@ function drawSide(rows, P_) {
      <div>Planejadas<b>${mi.planned} / ${mi.quota}</b></div>
      <div>Divisão por equipe<b>${(mi.teams || []).map((t) => t.n).join(' · ')}</b></div>
      ${own ? '<div><button type="button" class="act ghost" id="mq-reset">Usar meta padrão</button></div>' : ''}</div>
-     <p class="hint">Meta exata: o mês recebe sempre <b>${mi.quota}</b> agências, divididas igualmente entre as equipes; agências vinculadas ou excluídas não mudam o total (a fila automática compensa). ${
+     <p class="hint" title="Meta exata: o mês recebe sempre essa quantidade, dividida entre as equipes; vínculos e exclusões não mudam o total (a fila automática compensa).">${
        (mi.teams || []).some((t) => t.over)
          ? `<span class="warn">⚠ Equipe ${(mi.teams || [])
              .filter((t) => t.over)
@@ -2492,9 +2492,9 @@ function rpLigarLogistica(id) {
         : /^(Meses|Estados por m)/.test(t)
           ? 'ms'
           : 'eq';
-  let aberto = true;
+  let aberto = false; // recolhido: o resumo mostra o que está ligado
   try {
-    aberto = localStorage.getItem('rp-regras-aberto') !== '0';
+    aberto = localStorage.getItem('rp-regras-aberto') === '1';
   } catch (_) {}
   function rpRegras() {
     const cu = document.getElementById('c-uf');
@@ -2507,7 +2507,7 @@ function rpLigarLogistica(id) {
       box.className = 'card rpreg';
       box.open = aberto;
       box.innerHTML =
-        '<summary><span class="rt">Regras do plano</span><span class="rc" id="rp-reg-n"></span><span class="rh">Tudo o que muda o cálculo das rotas e das datas fica aqui</span></summary><div class="rgrid">' +
+        '<summary><span class="rt">Regras do plano</span><span class="rc" id="rp-reg-n"></span><span class="rh" id="rp-reg-lista">Tudo o que muda o cálculo das rotas e das datas</span></summary><div class="rgrid">' +
         GR.map(
           (g) => '<div class="rg" data-g="' + g[0] + '"><b>' + g[1] + '</b><small>' + g[2] + '</small><div class="rb"></div></div>',
         ).join('') +
@@ -2529,6 +2529,9 @@ function rpLigarLogistica(id) {
     box.querySelectorAll('.rg').forEach((g) => (g.hidden = !g.querySelector('.rb').children.length));
     const n = box.querySelectorAll('.ufb.etb.on').length;
     document.getElementById('rp-reg-n').textContent = n ? n + ' ligada' + (n > 1 ? 's' : '') : 'nenhuma ligada';
+    const nomes = [...box.querySelectorAll('.ufb.etb.on')].map((b) => b.textContent.replace(/:\s*ligad[oa].*$/i, '').replace(/\s*\(.*\)\s*$/, '').trim());
+    const rl = document.getElementById('rp-reg-lista');
+    if (rl) rl.textContent = nomes.length ? nomes.join(' · ') : 'Nenhuma: ordem padrão da estratégia';
   }
   const r0 = render;
   render = function () {

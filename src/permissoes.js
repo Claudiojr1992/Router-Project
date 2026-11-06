@@ -10,6 +10,7 @@ const MODULOS = [
   { id: 'app', nome: 'App do técnico', grupo: 'Operação', desc: 'Uso do app no celular, com e sem internet' },
   { id: 'faturamento', nome: 'Faturamento', grupo: 'Operação', desc: 'Medições, nota fiscal e recebimento' },
   { id: 'patrimonio', nome: 'Patrimônio', grupo: 'Operação', desc: 'Ativos com patrimônio e número de série, onde estão e em que situação' },
+  { id: 'materiais', nome: 'Materiais', grupo: 'Operação', desc: 'Estoque de material, entradas e onde cada lote foi aplicado (rastreabilidade)' },
   { id: 'chat', nome: 'Chat', grupo: 'Operação', desc: 'Conversas, pedidos e ocorrências' },
   { id: 'clientes', nome: 'Projetos · Cadastro e endereços', grupo: 'Cadastros', desc: 'Criar projetos; clientes, contratos, endereços, etapas e equipes' },
   { id: 'empresas', nome: 'Empresas', grupo: 'Cadastros', desc: 'Empresas executoras e parceiras' },
@@ -76,6 +77,12 @@ const ROTAS = [
   ['GET', P('/api/enderecos/[^/]+/ativos'), { any: ['patrimonio:ver', 'clientes:ver'] }],
   ['DELETE', P('/api/ativos/[^/]+'), ['patrimonio:editar', { acao: 'excluir' }]],
   ['*', P('/api/ativos(/.*)?'), 'patrimonio'],
+  // materiais (antes das regras gerais de endereços)
+  ['GET', P('/api/enderecos/[^/]+/materiais'), { any: ['materiais:ver', 'projetos:ver'] }],
+  ['POST', P('/api/materiais/movimentos'), { any: ['materiais:editar', 'projetos:editar'] }],
+  ['DELETE', P('/api/materiais/movimentos/[^/]+'), { any: ['materiais:editar', 'projetos:editar'] }],
+  ['GET', P('/api/materiais'), { any: ['materiais:ver', 'projetos:ver'] }],
+  ['*', P('/api/materiais(/.*)?'), 'materiais'],
   // cadastros
   ['DELETE', P('/api/enderecos/[^/]+'), ['clientes:editar', { acao: 'excluir' }]],
   ['POST', P('/api/enderecos/excluir'), ['clientes:editar', { acao: 'excluir' }]],

@@ -7,6 +7,7 @@ const { gerarRelatorio } = require('../relatorio');
 const { conferirConclusao } = require('../predecessora');
 const { criarExtra } = require('../extras');
 const { aplicarPlano } = require('../plano');
+const { aplicar, removerAplicacao } = require('./materiais');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATUS = ['a_fazer', 'em_andamento', 'aguardando', 'concluida'];
@@ -107,6 +108,13 @@ async function aplicarAcao(c, user, a) {
   } else if (a.tipo === 'comentario') {
     await c.query(`INSERT INTO tarefa_eventos (tarefa_id, usuario_id, tipo, detalhe) VALUES ($1,$2,'comentario',$3)`,
       [tarefaId, user.id, v.str(a.texto, 'o comentário', { max: 2000 })]);
+  } else if (a.tipo === 'material') {
+    // Material aplicado nesta atividade (rastreabilidade: lote, quantidade, técnico, data e GPS)
+    await aplicar(c, user, { ...a, tarefa_id: tarefaId, material_id: v.id(a.material_id, 'Material'), cliente_uuid: a.id });
+  } else if (a.tipo === 'material_remover') {
+    const ref = String(a.ref || '');
+    const m = /^\d+$/.test(ref) ? await removerAplicacao(c, user, 'm.id = $1', +ref) : await removerAplicacao(c, user, 'm.cliente_uuid = $1', uuid(ref, 'Material'));
+    if (!m) return; // já removido (ou nunca chegou)
   } else if (a.tipo === 'ativo') {
     // Patrimônio registrado no campo: fica instalado no endereço da atividade
     const txt = (x, max) => { const s2 = String(x ?? '').trim(); return s2 ? s2.slice(0, max) : null; };
@@ -140,7 +148,7 @@ module.exports = (app) => {
   app.get('/api/mobile/sync', interno, async (req) => {
     const u = req.user;
     const base = { usuario: { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, pessoa_id: u.pessoa_id, acoes: u.perm ? u.perm.acoes : {} }, servidor_em: new Date().toISOString() };
-    if (!u.pessoa_id) return { ...base, tarefas: [], checklists: {}, respostas: {}, fotos: {}, patrimonio: {}, extras: {} };
+    if (!u.pessoa_id) return { ...base, tarefas: [], checklists: {}, respostas: {}, fotos: {}, patrimonio: {}, extras: {}, materiais: [], aplicados: {} };
     const tarefas = await db.many(
       `SELECT t.id, t.status, t.prevista_inicio, t.prevista_fim, t.realizada_inicio, t.realizada_fim, t.observacao, t.atualizado_em,
               a.id AS atividade_id, a.nome AS atividade, a.etapa, a.checklist_id, a.evidencia, t.extra, t.quantidade::float, t.motivo, e.contrato_id,
@@ -148,7 +156,7 @@ module.exports = (app) => {
               (SELECT pt.status FROM tarefas pt WHERE pt.endereco_id = t.endereco_id AND pt.atividade_id = a.predecessora_id) AS pred_status,
               e.id AS endereco_id, e.codigo, e.nome AS endereco, e.logradouro, e.bairro, e.cep, e.municipio, e.uf, e.lat, e.lon,
               e.cameras, e.status AS endereco_status, e.aeroporto, e.km_aeroporto,
-              cl.nome AS cliente, ct.numero AS contrato,
+              cl.nome AS cliente, cl.id AS cliente_id, ct.numero AS contrato,
               (SELECT count(*)::int FROM tarefas x JOIN atividades xa ON xa.id = x.atividade_id AND xa.ativo WHERE x.endereco_id = e.id) AS end_atv_total,
               (SELECT count(*)::int FROM tarefas x JOIN atividades xa ON xa.id = x.atividade_id AND xa.ativo WHERE x.endereco_id = e.id AND x.status = 'concluida') AS end_atv_concluidas,
               COALESCE((SELECT json_agg(json_build_object('nome', ci.nome, 'quantidade', ei.quantidade) ORDER BY ci.ordem, ci.id)
@@ -195,7 +203,16 @@ module.exports = (app) => {
         (extras[x.contrato_id] = extras[x.contrato_id] || []).push({ id: x.id, nome: x.nome, item: x.item });
       }
     }
-    return { ...base, tarefas, checklists, respostas, fotos: fotosPor, patrimonio, extras };
+    // Controle de material: catálogo ativo e o que já foi aplicado em cada atividade do técnico
+    const materiais = await db.many(`SELECT id, codigo, nome, unidade, categoria FROM materiais WHERE ativo ORDER BY nome`);
+    const aplicados = {};
+    if (ids.length) {
+      for (const m of await db.many(
+        `SELECT m.id, m.cliente_uuid, m.tarefa_id, m.material_id, mt.nome AS material, mt.unidade, m.quantidade, m.lote, m.observacao, m.usuario_id, u.nome AS usuario, m.criado_em
+           FROM material_movimentos m JOIN materiais mt ON mt.id = m.material_id LEFT JOIN usuarios u ON u.id = m.usuario_id
+          WHERE m.tipo = 'aplicacao' AND m.tarefa_id = ANY($1::bigint[]) ORDER BY m.criado_em`, [ids])) (aplicados[m.tarefa_id] = aplicados[m.tarefa_id] || []).push(m);
+    }
+    return { ...base, tarefas, checklists, respostas, fotos: fotosPor, patrimonio, extras, materiais, aplicados };
   });
 
   // Fila de ações feitas offline: [{ id(uuid), tipo, tarefa_id, ... }]

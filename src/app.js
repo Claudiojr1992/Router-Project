@@ -23,6 +23,7 @@ require('./routes/relatorios')(app);
 require('./routes/chat')(app);
 require('./routes/faturamento')(app);
 require('./routes/patrimonio')(app);
+require('./routes/materiais')(app);
 require('./routes/conexoes')(app);
 require('./routes/admin')(app);
 require('./routes/tiles')(app);

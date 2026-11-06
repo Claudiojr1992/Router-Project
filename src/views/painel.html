@@ -21,26 +21,26 @@
 </nav>
 <div class="pane" data-pane="mapa">
 <section class="card filters">
-  <div class="ctl"><span class="lbl" id="l-uf">Estados — número = agências pendentes · marque um ou vários: o plano passa a conter só esses estados, distribuídos pela meta mês a mês</span>
+  <div class="ctl"><span class="lbl" id="l-uf" title="Número = agências pendentes. Marque um ou vários: o plano passa a conter só esses estados, distribuídos pela meta mês a mês.">Estados</span>
     <div class="ufrow"><div class="frow" id="c-uf" role="group" aria-labelledby="l-uf"></div><button type="button" class="act ghost" id="b-clr-uf">Limpar seleção de estados</button></div></div>
-  <div class="ctl"><span class="lbl" id="l-mo">Meses — agências pendentes / meta (concluídas são descontadas)</span><div class="mchips" id="c-mo" role="group" aria-labelledby="l-mo"></div></div>
+  <div class="ctl"><span class="lbl" id="l-mo" title="Agências pendentes / meta de cada mês (concluídas são descontadas)">Meses · pendentes / meta</span><div class="mchips" id="c-mo" role="group" aria-labelledby="l-mo"></div></div>
 </section>
 <section class="grid">
   <div class="card mapbox" id="mapbox"><div class="teamedit" id="teamedit"></div><div class="frow" style="margin-bottom:6px" id="ordbar"><button type="button" class="act" id="b-ord" aria-pressed="false">Definir ordem pelo mapa</button><button type="button" class="act" id="b-ord-save" hidden>Salvar ordem como regra</button><button type="button" class="act ghost" id="b-ord-clr">Limpar ordem</button><span class="rulebar" id="ord-note"></span></div>
     <div class="mapwrap"><div class="tiles" id="tiles" aria-hidden="true"></div><svg id="map" role="img" aria-label="Mapa das rotas"></svg><div class="attr" id="map-attr"></div>
     <div class="zoom"><button type="button" id="z-in" aria-label="Aproximar">+</button><button type="button" id="z-out" aria-label="Afastar">−</button><button type="button" id="z-0" aria-label="Ver tudo" style="font-size:.7rem">⤢</button></div></div>
-    <p class="note"><b>Arraste uma agência e solte sobre outra</b> para levá-la àquela equipe, mês e sequência (vira regra). Arraste o fundo para mover o mapa; roda do mouse ou +/− para aproximar até o nível da rua. Clique numa agência para abrir a equipe.</p>
+    <p class="note">Arraste uma agência sobre outra para mudar equipe, mês e ordem · roda do mouse ou +/− para aproximar · clique para abrir a equipe.</p>
     <div class="tip" id="tip" hidden></div></div>
   <div class="side" id="side"></div>
 </section>
 </div>
 <div class="pane" data-pane="plano" hidden>
 <section class="cards">
-  <div class="card meta" aria-labelledby="h-meta"><div class="ctitle"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg><div><h2 id="h-meta">Meta do mês</h2><div class="hint" style="margin:0">Meta exata por mês = nº de equipes × capacidade por equipe</div></div></div>
+  <div class="card meta" aria-labelledby="h-meta"><div class="ctitle"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg><h2 id="h-meta" title="Meta exata por mês = nº de equipes × capacidade por equipe">Meta do mês</h2></div>
     <div class="eq"><div class="box"><span class="lbl">Equipes com rota</span><div class="v"><span class="val" id="m-k">5</span><small>equipes</small></div></div><span class="op">×</span>
     <div class="box"><label class="lbl" for="m-cap">Capacidade por equipe</label><div class="v"><input type="number" id="m-cap" min="0.5" max="9999" step="0.1" value="4.8"><small>agências</small></div></div><span class="op">=</span>
     <div class="box hl"><label class="lbl" for="m-q">Meta mensal</label><div class="v"><input type="number" id="m-q" min="1" max="9999" step="1" value="24"><small>agências</small></div></div></div>
-    <p class="hint" id="m-hint">Todo mês recebe exatamente essa quantidade, dividida igualmente entre as equipes. Vínculos e exclusões não alteram o total.</p></div>
+    <p class="hint" id="m-hint" hidden></p></div>
   <div class="card" aria-labelledby="h-conc"><div class="ctitle"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg><h2 id="h-conc">Concluído no mês</h2></div>
     <div class="donut"><svg id="donut" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Percentual concluído no mês"></svg><div class="legend" id="d-leg"></div></div>
     <p class="hint" id="d-hint"></p></div>
@@ -50,7 +50,7 @@
     <div class="ctl"><span class="lbl" id="l-m">Modo logístico</span><div class="seg" id="c-m" role="group" aria-labelledby="l-m"></div></div>
     <div class="ctl"><label class="lbl" for="c-d">Início do deslocamento</label><input type="date" id="c-d" value="2026-11-03"></div>
     <div class="ctl"><span class="lbl" id="l-pl">Cronograma</span><div class="seg" id="c-pl" role="group" aria-labelledby="l-pl"></div></div>
-    <div class="ctl wide"><span class="lbl">Regras ativas</span><div class="rulebar" id="rules"></div></div>
+    <div class="ctl wide" hidden><span class="lbl">Regras ativas</span><div class="rulebar" id="rules"></div></div>
   </div></div>
 </section>
 <div id="regras-slot"></div>
